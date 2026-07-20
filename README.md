@@ -1,0 +1,1 @@
+# @narthia/openapi-sdk-generator

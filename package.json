@@ -1,0 +1,60 @@
+{
+  "name": "@narthia/openapi-sdk-generator",
+  "version": "0.0.3",
+  "description": "OpenAPI SDK Generator",
+  "homepage": "https://github.com/narthia/openapi-sdk-generator#readme",
+  "bugs": {
+    "url": "https://github.com/narthia/openapi-sdk-generator/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Jeevan Karnati",
+    "email": "jeevanreddy1999@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/narthia/openapi-sdk-generator.git"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "changeset": "changeset",
+    "changeset:publish": "changeset publish",
+    "changeset:version": "changeset version",
+    "check": "vp check",
+    "check:fix": "vp check --fix",
+    "dev": "vp pack --watch",
+    "prepublishOnly": "vp run check && vp run build"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.31.1",
+    "@narthia/toolkit": "^0.0.3",
+    "@types/node": "^26.1.1",
+    "bumpp": "^11.1.0",
+    "eslint-plugin-check-file": "^3.3.1",
+    "oxfmt": "^0.59.0",
+    "oxlint": "^1.74.0",
+    "typescript": "5.9.3",
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.5",
+    "vite-plus": "^0.2.5"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "packageManager": "bun@1.3.14"
+}
