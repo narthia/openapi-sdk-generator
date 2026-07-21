@@ -7,7 +7,7 @@ export default defineConfig({
     "*": "vp check --fix --no-error-on-unmatched-pattern",
   },
   pack: {
-    entry: ["src/index.ts", "src/*/index.ts"],
+    entry: ["src/index.ts", "src/*/index.ts", "src/transports/*/index.ts"],
     deps: {
       neverBundle: ["oxfmt", "oxlint"],
       dts: {
@@ -15,6 +15,9 @@ export default defineConfig({
       },
     },
     exports: true,
+  },
+  test: {
+    include: ["tests/**/*.test.ts"],
   },
   lint: {
     ...oxlintConfig,

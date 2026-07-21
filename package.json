@@ -15,6 +15,9 @@
     "type": "git",
     "url": "git+https://github.com/narthia/openapi-sdk-generator.git"
   },
+  "bin": {
+    "openapi-sdk-generator": "./dist/cli/index.mjs"
+  },
   "files": [
     "dist",
     "README.md",
@@ -23,6 +26,9 @@
   "type": "module",
   "exports": {
     ".": "./dist/index.mjs",
+    "./cli": "./dist/cli/index.mjs",
+    "./client": "./dist/client/index.mjs",
+    "./transports/http": "./dist/transports/http/index.mjs",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -36,13 +42,13 @@
     "check": "vp check",
     "check:fix": "vp check --fix",
     "dev": "vp pack --watch",
-    "prepublishOnly": "vp run check && vp run build"
+    "prepublishOnly": "vp run check && vp run build",
+    "test": "vp test"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.1",
     "@narthia/toolkit": "^0.0.3",
     "@types/node": "^26.1.1",
-    "bumpp": "^11.1.0",
     "eslint-plugin-check-file": "^3.3.1",
     "oxfmt": "^0.59.0",
     "oxlint": "^1.74.0",
