@@ -59,23 +59,31 @@ const client = createSdk({
   auth: { type: "bearer", token: () => getAccessToken() },
 });
 
-const pet = await client.pets.getPetById({ path: { petId: 42 } });
+const pet = await client.pets.getPetById({ petId: 42 });
 ```
 
-Method arguments are grouped by location, so hovering `getPetById` shows the full docs and types:
+Each method takes **one flat object** — path params, query params, and the request body's own properties are all merged, so calls read like plain JSON:
 
 ```ts
-client.pets.listPets({ query: { limit: 10, tags: ["cute"] } });
-client.pets.createPet({ body: { name: "Bella", status: "available" } });
+client.pets.listPets({ limit: 10, tags: ["cute"] }); // path + query
+client.pets.createPet({ name: "Bella", status: "available" }); // body properties, spread
 ```
 
-Non-2xx responses throw an `ApiError` carrying the status, headers, and parsed body:
+Headers stay in a nested `headers` group, and `signal` / `extensions` are reserved keys:
+
+```ts
+client.pets.getPetById({ petId: 42, headers: { "X-Request-ID": "abc" }, signal: ac.signal });
+```
+
+**Name collisions** — if a path or query param shares a name with a body property (or with each other), the _param_ is suffixed with its location (`status_query`, `id_path`); body properties always keep their exact names. For example, a `status` path param alongside a `status` body field becomes `{ status_path, status }`.
+
+Non-object bodies (binary uploads, arrays) can't be spread, so they stay under a single `body` key. Non-2xx responses throw an `ApiError` carrying the status, headers, and parsed body:
 
 ```ts
 import { ApiError } from "@narthia/openapi-sdk-generator/client";
 
 try {
-  await client.pets.getPetById({ path: { petId: 999 } });
+  await client.pets.getPetById({ petId: 999 });
 } catch (error) {
   if (error instanceof ApiError && error.status === 404) {
     // error.body is the parsed error payload
@@ -148,6 +156,7 @@ function lambdaTransport(opts: { functionName: string; lambda: LambdaClient }): 
 - JSON specs only (YAML support is planned; it is isolated to the loader).
 - Query serialization supports the OpenAPI default `form`/`explode`; other styles emit a warning and fall back to it.
 - Non-2xx response bodies are surfaced on `ApiError.body` but are not individually typed.
+- With flat arguments: a body with `additionalProperties` is still spread, but an open-map key matching a param name can't be disambiguated (known properties are handled via the suffix scheme). A body property literally named `signal` or `extensions` would be shadowed by those reserved keys.
 
 ## License
 

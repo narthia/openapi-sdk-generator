@@ -66,6 +66,13 @@ export interface IrBody {
   required: boolean;
   bodyType: BodyType;
   docs: IrDocs;
+  /**
+   * When set, the body is an object whose properties are spread into the
+   * method's flat options object; the array lists its known top-level property
+   * names (used for conflict detection). Absent = body is passed as a single
+   * `body` argument (non-object bodies: array, binary, union, primitive).
+   */
+  spreadProps?: string[];
 }
 
 export interface IrResponse {
@@ -337,7 +344,37 @@ class IrBuilder {
         description:
           typeof requestBody["description"] === "string" ? requestBody["description"] : undefined,
       },
+      spreadProps: this.resolveSpreadProps(type),
     };
+  }
+
+  /**
+   * Top-level property names of a body type, if it can be spread into the flat
+   * options object (a plain object, or an intersection/ref resolving to one).
+   * Returns `undefined` for non-spreadable bodies (array, binary, union, primitive).
+   */
+  private resolveSpreadProps(type: IrType, seen = new Set<string>()): string[] | undefined {
+    switch (type.kind) {
+      case "object":
+        return type.properties.map((p) => p.name);
+      case "ref": {
+        if (seen.has(type.name)) return undefined;
+        seen.add(type.name);
+        const schema = this.schemas.find((s) => s.name === type.name);
+        return schema ? this.resolveSpreadProps(schema.type, seen) : undefined;
+      }
+      case "intersection": {
+        const names: string[] = [];
+        for (const member of type.members) {
+          const memberProps = this.resolveSpreadProps(member, seen);
+          if (memberProps === undefined) return undefined;
+          names.push(...memberProps);
+        }
+        return [...new Set(names)];
+      }
+      default:
+        return undefined;
+    }
   }
 
   private buildResponse(rawOp: RawObject, methodName: string, context: string): IrResponse {
