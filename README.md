@@ -23,7 +23,7 @@ npx openapi-sdk-generator --input ./openapi.json --output ./src/sdk
 
 | Flag                           | Description                                                                    |
 | ------------------------------ | ------------------------------------------------------------------------------ |
-| `-i, --input <path\|url>`      | OpenAPI 3.0/3.1 spec — a JSON file path or an `http(s)` URL (**required**)     |
+| `-i, --input <path\|url>`      | OpenAPI 3.0/3.1 spec - a JSON file path or an `http(s)` URL (**required**)     |
 | `-o, --output <dir>`           | Directory to write the generated SDK into (**required**)                       |
 | `-n, --name <name>`            | Name of the generated factory (default: `createSdk`)                           |
 | `--runtime <pkg>`              | Runtime import specifier (default: `@narthia/openapi-sdk-generator`)           |
@@ -69,7 +69,7 @@ client.pets.listPets({ limit: 10, tags: ["cute"] }); // path + query
 client.pets.createPet({ name: "Bella", status: "available" }); // body properties, spread
 ```
 
-The second `options` argument keeps request controls out of your data. `headers` is available on **every** method — it overrides or adds to the client's default headers for that one call:
+The second `options` argument keeps request controls out of your data. `headers` is available on **every** method - it overrides or adds to the client's default headers for that one call:
 
 ```ts
 client.pets.getPetById({ petId: 42 }, { headers: { "X-Request-ID": "abc" }, signal: ac.signal });
@@ -77,7 +77,7 @@ client.pets.getPetById({ petId: 42 }, { headers: { "X-Request-ID": "abc" }, sign
 
 Operations with no path/query/body take only the `options` argument (e.g. `client.health.getHealth({ signal })`).
 
-**Name collisions** — if a path or query param shares a name with a body property (or with each other), the _param_ is suffixed with its location (`status_query`, `id_path`); body properties always keep their exact names. For example, a `status` path param alongside a `status` body field becomes `{ status_path, status }` in the data object.
+**Name collisions** - if a path or query param shares a name with a body property (or with each other), the _param_ is suffixed with its location (`status_query`, `id_path`); body properties always keep their exact names. For example, a `status` path param alongside a `status` body field becomes `{ status_path, status }` in the data object.
 
 Non-object bodies (binary uploads, arrays) can't be spread, so they stay under a single `body` key in the data object. Non-2xx responses throw an `ApiError` carrying the status, headers, and parsed body:
 
@@ -93,6 +93,64 @@ try {
 }
 ```
 
+### Request options (`signal`, `extensions`)
+
+The second `options` argument also carries two request controls.
+
+**`signal`** is a standard `AbortSignal` for cancelling or timing out a request (it is passed straight to the transport):
+
+```ts
+// Time out after 5s
+await client.pets.getPetById({ petId: 42 }, { signal: AbortSignal.timeout(5000) });
+
+// Cancel a superseded request (e.g. search-as-you-type)
+const ac = new AbortController();
+const promise = client.pets.listPets({ tags: [term] }, { signal: ac.signal });
+ac.abort(); // rejects `promise` with an AbortError
+```
+
+**`extensions`** is an open bag passed verbatim to the transport for per-call, transport-specific options. The HTTP transport reads `extensions.fetchOptions` and merges it into that single `fetch` call (overriding any `fetchOptions` set on the transport itself):
+
+```ts
+// Bypass the HTTP cache for one call
+await client.pets.listPets({ limit: 10 }, { extensions: { fetchOptions: { cache: "no-store" } } });
+
+// Next.js per-request revalidation
+await client.pets.getPetById(
+  { petId: 42 },
+  {
+    extensions: { fetchOptions: { next: { revalidate: 60 } } },
+  }
+);
+```
+
+A different transport defines its own `extensions` shape (e.g. a Lambda transport could read `extensions.qualifier`), so the generated SDK never has to change to pass a transport a per-call hint.
+
+### Reuse the client (initialize once)
+
+Create the client **once** and import it everywhere - it holds no per-request state, so a single instance is safe to share across your whole app and across concurrent requests. You do **not** re-initialize per call.
+
+```ts
+// lib/api.ts
+import { createSdk } from "../sdk";
+import { httpTransport } from "@narthia/openapi-sdk-generator/transports/http";
+
+export const api = createSdk({
+  baseUrl: process.env.API_URL,
+  transport: httpTransport(),
+  // A function is resolved per request, so a long-lived client keeps working as tokens rotate.
+  auth: { type: "bearer", token: () => getAccessToken() },
+});
+```
+
+```ts
+// anywhere else
+import { api } from "./lib/api";
+const pet = await api.pets.getPetById({ petId: 42 });
+```
+
+Anything that varies per request goes in the second `options` argument (`headers`, `signal`) - not in a new client. Create more than one instance only when the **client-level** config genuinely differs (a different `baseUrl`, transport, or auth identity); reuse each of those too.
+
 ### Generated output layout
 
 ```
@@ -102,12 +160,12 @@ sdk/
   types/
     common.ts           # types shared by 2+ services
     <service>.ts        # types used by a single service
-    index.ts            # barrel — import type { X } from "../types"
+    index.ts            # barrel - import type { X } from "../types"
 ```
 
 ## Runtime architecture
 
-The **client core does all OpenAPI-aware work** — path interpolation, query serialization, header/auth merging, body encoding, response decoding, and error normalization. A **transport** is a dumb executor that moves a prepared request to a backend:
+The **client core does all OpenAPI-aware work** - path interpolation, query serialization, header/auth merging, body encoding, response decoding, and error normalization. A **transport** is a dumb executor that moves a prepared request to a backend:
 
 ```ts
 interface Transport {
@@ -115,34 +173,30 @@ interface Transport {
 }
 ```
 
-Because generated code only ever talks to the client core, adding a new backend is a matter of implementing this one interface — no regeneration required. A future Lambda transport, for example:
+Because generated code only ever talks to the client core, a transport can be a brand-new backend **or** a wrapper that adds behavior around another transport - no regeneration required. For example, a retry transport that wraps the built-in HTTP one and retries network errors and `5xx` responses with exponential backoff:
 
 ```ts
+import { httpTransport } from "@narthia/openapi-sdk-generator/transports/http";
 import type { Transport } from "@narthia/openapi-sdk-generator/client";
 
-function lambdaTransport(opts: { functionName: string; lambda: LambdaClient }): Transport {
+function withRetry(inner: Transport, retries = 3): Transport {
   return {
     async request(req) {
-      const payload = {
-        httpMethod: req.method.toUpperCase(),
-        path: req.path,
-        queryStringParameters: Object.fromEntries(req.query),
-        headers: req.headers,
-        body: req.body?.toString() ?? null,
-      };
-      const out = await opts.lambda.send(
-        new InvokeCommand({ FunctionName: opts.functionName, Payload: JSON.stringify(payload) }),
-      );
-      const parsed = JSON.parse(new TextDecoder().decode(out.Payload));
-      return {
-        status: parsed.statusCode,
-        headers: parsed.headers ?? {},
-        text: async () => parsed.body ?? "",
-        arrayBuffer: async () => new TextEncoder().encode(parsed.body ?? "").buffer,
-      };
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const res = await inner.request(req);
+          if (res.status < 500 || attempt === retries) return res;
+        } catch (error) {
+          if (attempt === retries) throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 100));
+      }
     },
   };
 }
+
+// Compose it with the built-in HTTP transport - the generated SDK is unchanged:
+const client = createSdk({ transport: withRetry(httpTransport()) });
 ```
 
 ## Exports
