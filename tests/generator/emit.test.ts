@@ -106,13 +106,13 @@ describe("flat method arguments", () => {
     // Body keeps `status` and `name`; path becomes status_path, query status_query.
     expect(service).toContain("status_path: string;");
     expect(service).toContain("status_query?: string;");
-    // Destructure pulls the renamed params out; the rest is the body.
-    expect(service).toContain("const { status_path, status_query, signal, extensions, ...body } =");
+    // Destructure pulls the renamed params out of `params`; the rest is the body.
+    expect(service).toContain("const { status_path, status_query, ...body } = params;");
     // Request maps them back to their wire names (runtime routing of the
     // destructure+rest pattern is exercised end-to-end in e2e.test.ts).
     expect(service).toContain("pathParams: { status: status_path }");
     expect(service).toContain("query: { status: status_query }");
-    expect(service).toContain("body,");
+    expect(service).toContain("body: body,");
   });
 });
 

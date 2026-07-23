@@ -54,15 +54,14 @@ interface FlatPlan {
 }
 
 /**
- * Merge path params, query params, and (spread) body properties into one flat
- * options object. Body properties keep their names; a path/query param that
+ * Merge path params, query params, and (spread) body properties into the first
+ * `params` argument. Body properties keep their names; a path/query param that
  * collides with a body property (or with each other) is suffixed with its
- * location (`id_path`, `status_query`). Headers stay in a nested `headers`
- * group; `signal`/`extensions` are reserved sibling keys.
+ * location (`id_path`, `status_query`). Headers, `signal`, and `extensions`
+ * live in the separate `options` argument, so they never collide with data.
  */
 function computeFlatPlan(op: IrOperation): FlatPlan {
-  const used = new Set<string>(["signal", "extensions"]);
-  if (op.headerParams.length > 0) used.add("headers");
+  const used = new Set<string>();
 
   const bodySpread = op.body?.spreadProps !== undefined;
   if (op.body?.spreadProps) for (const name of op.body.spreadProps) used.add(name);
@@ -85,12 +84,16 @@ function computeFlatPlan(op: IrOperation): FlatPlan {
   return { params, bodySpread };
 }
 
-/** Whether the whole `options` object can be optional (nothing required). */
-function optionsOptional(op: IrOperation): boolean {
+/** True when the operation has data for the first (`params`) argument. */
+function hasData(op: IrOperation): boolean {
+  return op.pathParams.length > 0 || op.queryParams.length > 0 || op.body !== undefined;
+}
+
+/** Whether the `params` argument can be optional (nothing in it is required). */
+function paramsOptional(op: IrOperation): boolean {
   const required =
     op.pathParams.length > 0 ||
     op.queryParams.some((p) => p.required) ||
-    op.headerParams.some((p) => p.required) ||
     (op.body !== undefined && op.body.required);
   return !required;
 }
@@ -115,10 +118,15 @@ function emitOperation(op: IrOperation): string {
   );
   if (doc) lines.push(doc);
 
-  const options = optionsSignature(op, plan, indent);
+  // Two args: data first (path/query/body), request options second. When the
+  // operation has no data, only the `options` argument is emitted.
+  const args: string[] = [];
+  if (hasData(op)) args.push(paramsSignature(op, plan, indent));
+  args.push(`options?: ${optionsType(op, indent)}`);
+
   const returnType =
     op.response.type.kind === "void" ? "void" : printType(op.response.type, indent);
-  lines.push(`${indent}${op.methodName}(${options}): Promise<${returnType}> {`);
+  lines.push(`${indent}${op.methodName}(${args.join(", ")}): Promise<${returnType}> {`);
   lines.push(...requestCall(op, plan, `${indent}  `));
   lines.push(`${indent}},`);
   return lines.join("\n");
@@ -129,23 +137,24 @@ function paramDocs(op: IrOperation, plan: FlatPlan): { name: string; description
   const docs: { name: string; description?: string }[] = [];
   for (const { param, local } of plan.params) {
     if (param.docs.description) {
-      docs.push({ name: `options.${local}`, description: param.docs.description });
+      docs.push({ name: `params.${local}`, description: param.docs.description });
     }
+  }
+  // Spread body properties are documented on their own type; only a
+  // single-argument (non-spread) body needs a `@param params.body` line.
+  if (op.body && !plan.bodySpread && op.body.docs.description) {
+    docs.push({ name: "params.body", description: op.body.docs.description });
   }
   for (const param of op.headerParams) {
     if (param.docs.description) {
       docs.push({ name: `options.headers.${param.name}`, description: param.docs.description });
     }
   }
-  // Spread body properties are documented on their own type; only a
-  // single-argument (non-spread) body needs a `@param options.body` line.
-  if (op.body && !plan.bodySpread && op.body.docs.description) {
-    docs.push({ name: "options.body", description: op.body.docs.description });
-  }
   return docs;
 }
 
-function optionsSignature(op: IrOperation, plan: FlatPlan, indent: string): string {
+/** The `params` (data) argument: path/query flat + spread/keyed body. */
+function paramsSignature(op: IrOperation, plan: FlatPlan, indent: string): string {
   const inner = `${indent}  `;
   const literalLines: string[] = [];
 
@@ -159,68 +168,93 @@ function optionsSignature(op: IrOperation, plan: FlatPlan, indent: string): stri
     );
   }
 
-  // Headers stay a nested group.
-  if (op.headerParams.length > 0) {
-    const groupOptional = op.headerParams.every((p) => !p.required) ? "?" : "";
-    const propLines = op.headerParams.flatMap((param) =>
-      printProperty(
-        { name: param.name, type: param.type, required: param.required, docs: param.docs },
-        `${inner}  `
-      )
-    );
-    literalLines.push(`${inner}headers${groupOptional}: {`, ...propLines, `${inner}};`);
-  }
-
   // Non-spreadable body (array/binary/union/primitive) stays a single `body` key.
   if (op.body && !plan.bodySpread) {
     const optional = op.body.required ? "" : "?";
     literalLines.push(`${inner}body${optional}: ${printType(op.body.type, inner)};`);
   }
 
-  literalLines.push(`${inner}signal?: AbortSignal;`);
-  literalLines.push(`${inner}extensions?: Record<string, unknown>;`);
+  const opt = paramsOptional(op) ? "?" : "";
 
-  const literal = `{\n${literalLines.join("\n")}\n${indent}}`;
-  const opt = optionsOptional(op) ? "?" : "";
-
-  // Spread body → intersect the body type with the control/param literal.
+  // Spread body with extra path/query params → intersect body with the literal.
   if (plan.bodySpread && op.body) {
-    return `options${opt}: ${printType(op.body.type, indent)} & ${literal}`;
+    if (literalLines.length === 0) return `params${opt}: ${printType(op.body.type, indent)}`;
+    const literal = `{\n${literalLines.join("\n")}\n${indent}}`;
+    return `params${opt}: ${printType(op.body.type, indent)} & ${literal}`;
   }
-  return `options${opt}: ${literal}`;
+  const literal = `{\n${literalLines.join("\n")}\n${indent}}`;
+  return `params${opt}: ${literal}`;
+}
+
+/** The `options` (request-control) argument type, present on every method. */
+function optionsType(op: IrOperation, indent: string): string {
+  const inner = `${indent}  `;
+  const lines: string[] = [`${inner}headers?: ${headersType(op, inner)};`];
+  lines.push(`${inner}signal?: AbortSignal;`);
+  lines.push(`${inner}extensions?: Record<string, unknown>;`);
+  return `{\n${lines.join("\n")}\n${indent}}`;
+}
+
+/**
+ * Per-request headers type: any string/number/boolean header may be set to
+ * override or add to the client's default headers. When the spec declares
+ * header params, they appear as typed (and possibly required) known keys.
+ */
+function headersType(op: IrOperation, indent: string): string {
+  const record = "Record<string, string | number | boolean>";
+  if (op.headerParams.length === 0) return record;
+  const inner = `${indent}  `;
+  const propLines = op.headerParams.flatMap((param) =>
+    printProperty(
+      { name: param.name, type: param.type, required: param.required, docs: param.docs },
+      inner
+    )
+  );
+  return `{\n${propLines.join("\n")}\n${indent}} & ${record}`;
 }
 
 function requestCall(op: IrOperation, plan: FlatPlan, indent: string): string[] {
   const inner = `${indent}  `;
+  const lines: string[] = [];
 
-  // Destructure known keys; a spread body captures everything left over.
-  const names = plan.params.map((p) => p.local);
-  if (op.headerParams.length > 0) names.push("headers");
-  names.push("signal", "extensions");
-  if (op.body && !plan.bodySpread) names.push("body");
-  const rest = plan.bodySpread ? ", ...body" : "";
-  const source = optionsOptional(op) ? "options ?? {}" : "options";
-  const destructure = `${indent}const { ${names.join(", ")}${rest} } = ${source};`;
+  // Pull path/query params (and, for a spread body, the leftover `...body`) out
+  // of `params` so they can be referenced as plain locals below.
+  const locals = plan.params.map((p) => p.local);
+  const destructured = [...locals];
+  const spreadRest = Boolean(op.body) && plan.bodySpread && locals.length > 0;
+  let bodyExpr: string | undefined;
+
+  if (op.body) {
+    if (plan.bodySpread) {
+      bodyExpr = locals.length > 0 ? "body" : "params"; // no locals → params IS the body
+    } else {
+      destructured.push("body");
+      bodyExpr = "body";
+    }
+  }
+
+  if (destructured.length > 0) {
+    const source = paramsOptional(op) ? "params ?? {}" : "params";
+    const rest = spreadRest ? ", ...body" : "";
+    lines.push(`${indent}const { ${destructured.join(", ")}${rest} } = ${source};`);
+  }
 
   const fields: string[] = [`${inner}method: "${op.httpMethod}",`, `${inner}path: "${op.path}",`];
-  if (op.pathParams.length > 0) {
-    fields.push(`${inner}pathParams: { ${paramMap(plan, "path")} },`);
-  }
-  if (op.queryParams.length > 0) {
-    fields.push(`${inner}query: { ${paramMap(plan, "query")} },`);
-  }
-  if (op.headerParams.length > 0) fields.push(`${inner}headers,`);
+  if (op.pathParams.length > 0) fields.push(`${inner}pathParams: { ${paramMap(plan, "path")} },`);
+  if (op.queryParams.length > 0) fields.push(`${inner}query: { ${paramMap(plan, "query")} },`);
+  fields.push(`${inner}headers: options?.headers,`);
   if (op.body) {
-    fields.push(`${inner}body,`);
+    fields.push(`${inner}body: ${bodyExpr},`);
     if (op.body.bodyType !== "json") fields.push(`${inner}bodyType: "${op.body.bodyType}",`);
   }
   if (op.response.responseType !== "json") {
     fields.push(`${inner}responseType: "${op.response.responseType}",`);
   }
-  fields.push(`${inner}signal,`);
-  fields.push(`${inner}extensions,`);
+  fields.push(`${inner}signal: options?.signal,`);
+  fields.push(`${inner}extensions: options?.extensions,`);
 
-  return [destructure, `${indent}return ctx.request({`, ...fields, `${indent}});`];
+  lines.push(`${indent}return ctx.request({`, ...fields, `${indent}});`);
+  return lines;
 }
 
 /** `{ wireName: localName }` entries mapping flat args back to their wire names. */

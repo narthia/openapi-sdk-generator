@@ -11,17 +11,18 @@ export function createStoreService(ctx: ClientContext) {
      *
      * @returns The placed order
      */
-    placeOrder(options: Order & {
+    placeOrder(params: Order, options?: {
+      headers?: Record<string, string | number | boolean>;
       signal?: AbortSignal;
       extensions?: Record<string, unknown>;
     }): Promise<Order> {
-      const { signal, extensions, ...body } = options;
       return ctx.request({
         method: "post",
         path: "/store/orders",
-        body,
-        signal,
-        extensions,
+        headers: options?.headers,
+        body: params,
+        signal: options?.signal,
+        extensions: options?.extensions,
       });
     },
 
@@ -30,18 +31,21 @@ export function createStoreService(ctx: ClientContext) {
      *
      * @returns The order
      */
-    getOrder(options: {
+    getOrder(params: {
       orderId: string;
+    }, options?: {
+      headers?: Record<string, string | number | boolean>;
       signal?: AbortSignal;
       extensions?: Record<string, unknown>;
     }): Promise<Order> {
-      const { orderId, signal, extensions } = options;
+      const { orderId } = params;
       return ctx.request({
         method: "get",
         path: "/store/orders/{orderId}",
         pathParams: { orderId },
-        signal,
-        extensions,
+        headers: options?.headers,
+        signal: options?.signal,
+        extensions: options?.extensions,
       });
     },
   };

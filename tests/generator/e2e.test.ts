@@ -50,13 +50,14 @@ describe("end-to-end: generate, import, and call", () => {
 
     // The SDK is generated at runtime, so it has no static type here. Describe
     // just the surface this test drives.
+    type Opts = { headers?: Record<string, string | number | boolean>; signal?: AbortSignal };
     interface PetsSdk {
       createSdk: (config: { baseUrl?: string; transport?: Transport }) => {
         pets: {
-          listPets: (o?: { limit?: number; tags?: string[] }) => Promise<unknown>;
-          getPetById: (o: { petId: number }) => Promise<unknown>;
-          createPet: (o: { name: string; status?: string }) => Promise<unknown>;
-          deletePet: (o: { petId: number }) => Promise<unknown>;
+          listPets: (p?: { limit?: number; tags?: string[] }, o?: Opts) => Promise<unknown>;
+          getPetById: (p: { petId: number }, o?: Opts) => Promise<unknown>;
+          createPet: (p: { name: string; status?: string }, o?: Opts) => Promise<unknown>;
+          deletePet: (p: { petId: number }, o?: Opts) => Promise<unknown>;
         };
       };
     }
@@ -83,10 +84,11 @@ describe("end-to-end: generate, import, and call", () => {
     expect(requests[0]!.query.get("limit")).toBe("10");
     expect(requests[0]!.query.getAll("tags")).toEqual(["cute", "small"]);
 
-    // Flat path param + typed object response.
-    const pet = await sdk.pets.getPetById({ petId: 1 });
+    // Flat path param + typed object response + per-request header override via options.
+    const pet = await sdk.pets.getPetById({ petId: 1 }, { headers: { "X-Request-ID": "trace-1" } });
     expect(pet).toEqual({ id: 1, name: "Bella" });
     expect(requests[1]!.path).toBe("/pets/1");
+    expect(requests[1]!.headers["x-request-id"]).toBe("trace-1");
 
     // Flat (spread) JSON request body.
     await sdk.pets.createPet({ name: "Max", status: "pending" });

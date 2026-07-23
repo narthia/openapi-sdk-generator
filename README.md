@@ -2,10 +2,10 @@
 
 Generate a fully typed, JSDoc-documented TypeScript SDK from an OpenAPI 3.0/3.1 spec.
 
-- **Rich IDE hover** — every service method and type carries JSDoc built from the spec's summaries, descriptions, `@param` docs, `@deprecated`, `@default`, `@format`, and `@see` links.
-- **Modular runtime** — one import initializes the client, another provides the transport. HTTP (fetch) ships today; the `Transport` interface is designed so AWS Lambda, Atlassian Forge, and others slot in without regenerating.
-- **Typed end to end** — path/query/header params, request bodies, and 2xx responses are all typed. Shared schemas live in a common types file; service-specific schemas live alongside their service.
-- **Minimal dependencies** — hand-rolled spec parsing and emission; the CLI uses only Node built-ins.
+- **Rich IDE hover** - every service method and type carries JSDoc built from the spec's summaries, descriptions, `@param` docs, `@deprecated`, `@default`, `@format`, and `@see` links.
+- **Modular runtime** - one import initializes the client, another provides the transport. HTTP (fetch) ships today; the `Transport` interface is designed so AWS Lambda, Atlassian Forge, and others slot in without regenerating.
+- **Typed end to end** - path/query/header params, request bodies, and 2xx responses are all typed. Shared schemas live in a common types file; service-specific schemas live alongside their service.
+- **Minimal dependencies** - hand-rolled spec parsing and emission; the CLI uses only Node built-ins.
 
 ## Install
 
@@ -62,22 +62,24 @@ const client = createSdk({
 const pet = await client.pets.getPetById({ petId: 42 });
 ```
 
-Each method takes **one flat object** — path params, query params, and the request body's own properties are all merged, so calls read like plain JSON:
+Each method takes **two arguments**: the **data** first (path params, query params, and the request body's own properties, all merged into one flat object), and an optional **`options`** second (per-request `headers`, `signal`, `extensions`):
 
 ```ts
 client.pets.listPets({ limit: 10, tags: ["cute"] }); // path + query
 client.pets.createPet({ name: "Bella", status: "available" }); // body properties, spread
 ```
 
-Headers stay in a nested `headers` group, and `signal` / `extensions` are reserved keys:
+The second `options` argument keeps request controls out of your data. `headers` is available on **every** method — it overrides or adds to the client's default headers for that one call:
 
 ```ts
-client.pets.getPetById({ petId: 42, headers: { "X-Request-ID": "abc" }, signal: ac.signal });
+client.pets.getPetById({ petId: 42 }, { headers: { "X-Request-ID": "abc" }, signal: ac.signal });
 ```
 
-**Name collisions** — if a path or query param shares a name with a body property (or with each other), the _param_ is suffixed with its location (`status_query`, `id_path`); body properties always keep their exact names. For example, a `status` path param alongside a `status` body field becomes `{ status_path, status }`.
+Operations with no path/query/body take only the `options` argument (e.g. `client.health.getHealth({ signal })`).
 
-Non-object bodies (binary uploads, arrays) can't be spread, so they stay under a single `body` key. Non-2xx responses throw an `ApiError` carrying the status, headers, and parsed body:
+**Name collisions** — if a path or query param shares a name with a body property (or with each other), the _param_ is suffixed with its location (`status_query`, `id_path`); body properties always keep their exact names. For example, a `status` path param alongside a `status` body field becomes `{ status_path, status }` in the data object.
+
+Non-object bodies (binary uploads, arrays) can't be spread, so they stay under a single `body` key in the data object. Non-2xx responses throw an `ApiError` carrying the status, headers, and parsed body:
 
 ```ts
 import { ApiError } from "@narthia/openapi-sdk-generator/client";
@@ -129,7 +131,7 @@ function lambdaTransport(opts: { functionName: string; lambda: LambdaClient }): 
         body: req.body?.toString() ?? null,
       };
       const out = await opts.lambda.send(
-        new InvokeCommand({ FunctionName: opts.functionName, Payload: JSON.stringify(payload) })
+        new InvokeCommand({ FunctionName: opts.functionName, Payload: JSON.stringify(payload) }),
       );
       const parsed = JSON.parse(new TextDecoder().decode(out.Payload));
       return {
@@ -156,7 +158,7 @@ function lambdaTransport(opts: { functionName: string; lambda: LambdaClient }): 
 - JSON specs only (YAML support is planned; it is isolated to the loader).
 - Query serialization supports the OpenAPI default `form`/`explode`; other styles emit a warning and fall back to it.
 - Non-2xx response bodies are surfaced on `ApiError.body` but are not individually typed.
-- With flat arguments: a body with `additionalProperties` is still spread, but an open-map key matching a param name can't be disambiguated (known properties are handled via the suffix scheme). A body property literally named `signal` or `extensions` would be shadowed by those reserved keys.
+- Flat data object: a body with `additionalProperties` is still spread, but an open-map key matching a path/query param name can't be disambiguated (known properties are handled via the suffix scheme). Request controls (`headers`/`signal`/`extensions`) live in the separate `options` argument, so they never collide with body/query/path data.
 
 ## License
 

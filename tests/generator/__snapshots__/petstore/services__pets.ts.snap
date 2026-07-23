@@ -13,11 +13,11 @@ export function createPetsService(ctx: ClientContext) {
      *
      * Use the `limit` parameter to control page size.
      *
-     * @param options.limit - Maximum number of pets to return
-     * @param options.tags - Only return pets with these tags
+     * @param params.limit - Maximum number of pets to return
+     * @param params.tags - Only return pets with these tags
      * @returns A list of pets
      */
-    listPets(options?: {
+    listPets(params?: {
       /**
        * Maximum number of pets to return
        *
@@ -28,16 +28,19 @@ export function createPetsService(ctx: ClientContext) {
       /** Only return pets with these tags */
       tags?: string[];
       sort?: "name" | "age";
+    }, options?: {
+      headers?: Record<string, string | number | boolean>;
       signal?: AbortSignal;
       extensions?: Record<string, unknown>;
     }): Promise<Pet[]> {
-      const { limit, tags, sort, signal, extensions } = options ?? {};
+      const { limit, tags, sort } = params ?? {};
       return ctx.request({
         method: "get",
         path: "/pets",
         query: { limit, tags, sort },
-        signal,
-        extensions,
+        headers: options?.headers,
+        signal: options?.signal,
+        extensions: options?.extensions,
       });
     },
 
@@ -46,50 +49,52 @@ export function createPetsService(ctx: ClientContext) {
      *
      * @returns The created pet
      */
-    createPet(options: NewPet & {
+    createPet(params: NewPet, options?: {
+      headers?: Record<string, string | number | boolean>;
       signal?: AbortSignal;
       extensions?: Record<string, unknown>;
     }): Promise<Pet> {
-      const { signal, extensions, ...body } = options;
       return ctx.request({
         method: "post",
         path: "/pets",
-        body,
-        signal,
-        extensions,
+        headers: options?.headers,
+        body: params,
+        signal: options?.signal,
+        extensions: options?.extensions,
       });
     },
 
     /**
      * Get a pet by ID
      *
-     * @param options.petId - ID of the pet to fetch
+     * @param params.petId - ID of the pet to fetch
      * @param options.headers.X-Request-ID - Correlation ID
      * @returns The requested pet
      * @see https://example.com/docs/pets Pet guide
      */
-    getPetById(options: {
+    getPetById(params: {
       /**
        * ID of the pet to fetch
        *
        * @format int64
        */
       petId: number;
+    }, options?: {
       headers?: {
         /** Correlation ID */
         "X-Request-ID"?: string;
-      };
+      } & Record<string, string | number | boolean>;
       signal?: AbortSignal;
       extensions?: Record<string, unknown>;
     }): Promise<Pet> {
-      const { petId, headers, signal, extensions } = options;
+      const { petId } = params;
       return ctx.request({
         method: "get",
         path: "/pets/{petId}",
         pathParams: { petId },
-        headers,
-        signal,
-        extensions,
+        headers: options?.headers,
+        signal: options?.signal,
+        extensions: options?.extensions,
       });
     },
 
@@ -99,20 +104,23 @@ export function createPetsService(ctx: ClientContext) {
      * @returns Deleted
      * @deprecated
      */
-    deletePet(options: {
+    deletePet(params: {
       /** @format int64 */
       petId: number;
+    }, options?: {
+      headers?: Record<string, string | number | boolean>;
       signal?: AbortSignal;
       extensions?: Record<string, unknown>;
     }): Promise<void> {
-      const { petId, signal, extensions } = options;
+      const { petId } = params;
       return ctx.request({
         method: "delete",
         path: "/pets/{petId}",
         pathParams: { petId },
+        headers: options?.headers,
         responseType: "void",
-        signal,
-        extensions,
+        signal: options?.signal,
+        extensions: options?.extensions,
       });
     },
 
@@ -121,20 +129,23 @@ export function createPetsService(ctx: ClientContext) {
      *
      * @returns The photo
      */
-    downloadPetPhoto(options: {
+    downloadPetPhoto(params: {
       /** @format int64 */
       petId: number;
+    }, options?: {
+      headers?: Record<string, string | number | boolean>;
       signal?: AbortSignal;
       extensions?: Record<string, unknown>;
     }): Promise<Blob> {
-      const { petId, signal, extensions } = options;
+      const { petId } = params;
       return ctx.request({
         method: "get",
         path: "/pets/{petId}/photo",
         pathParams: { petId },
+        headers: options?.headers,
         responseType: "binary",
-        signal,
-        extensions,
+        signal: options?.signal,
+        extensions: options?.extensions,
       });
     },
 
@@ -143,28 +154,31 @@ export function createPetsService(ctx: ClientContext) {
      *
      * @returns Photo metadata
      */
-    uploadPetPhoto(options: {
+    uploadPetPhoto(params: {
       /** The image file */
       file: Blob;
       caption?: string;
     } & {
       /** @format int64 */
       petId: number;
+    }, options?: {
+      headers?: Record<string, string | number | boolean>;
       signal?: AbortSignal;
       extensions?: Record<string, unknown>;
     }): Promise<{
       /** @format uri */
       url?: string;
     }> {
-      const { petId, signal, extensions, ...body } = options;
+      const { petId, ...body } = params;
       return ctx.request({
         method: "post",
         path: "/pets/{petId}/photo",
         pathParams: { petId },
-        body,
+        headers: options?.headers,
+        body: body,
         bodyType: "form-data",
-        signal,
-        extensions,
+        signal: options?.signal,
+        extensions: options?.extensions,
       });
     },
   };

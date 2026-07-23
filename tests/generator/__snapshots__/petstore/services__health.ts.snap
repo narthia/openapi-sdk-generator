@@ -11,17 +11,18 @@ export function createHealthService(ctx: ClientContext) {
      * @returns Service health
      */
     getHealth(options?: {
+      headers?: Record<string, string | number | boolean>;
       signal?: AbortSignal;
       extensions?: Record<string, unknown>;
     }): Promise<{
       status?: "ok" | "degraded";
     }> {
-      const { signal, extensions } = options ?? {};
       return ctx.request({
         method: "get",
         path: "/health",
-        signal,
-        extensions,
+        headers: options?.headers,
+        signal: options?.signal,
+        extensions: options?.extensions,
       });
     },
   };
