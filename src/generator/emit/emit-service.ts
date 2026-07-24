@@ -5,7 +5,13 @@ import { collectRefs } from "../ir.ts";
 import { buildJsDoc } from "../jsdoc.ts";
 import { camelCase, propertyKey, snakeCase } from "../names.ts";
 import { GENERATED_HEADER, operationTypes } from "./emit-types.ts";
-import { printProperty, printType, relativeImport, runtimeClientImport } from "./ts-writer.ts";
+import {
+  clientBase,
+  printProperty,
+  printType,
+  relativeImport,
+  runtimeClientImport,
+} from "./ts-writer.ts";
 
 export function emitService(service: IrService, ctx: EmitContext): string {
   const usedTypes = new Set<string>();
@@ -14,7 +20,9 @@ export function emitService(service: IrService, ctx: EmitContext): string {
   }
 
   const parts: string[] = [GENERATED_HEADER, ""];
-  parts.push(`import type { ClientContext } from "${runtimeClientImport(ctx, "../client")}";`);
+  parts.push(
+    `import type { ClientContext } from "${runtimeClientImport(ctx, clientBase(ctx.subdirDepth + 1))}";`
+  );
   if (usedTypes.size > 0) {
     const names = [...usedTypes].sort().join(", ");
     parts.push(`import type { ${names} } from "${relativeImport(ctx, "../types", true)}";`);

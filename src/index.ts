@@ -13,6 +13,8 @@ export type {
   GeneratedFile,
   GenerateOptions,
   GenerateResult,
+  SharedOptions,
+  TargetOptions,
 } from "./generator/generate.ts";
 export { defineConfig } from "./config.ts";
 export type { Config } from "./config.ts";

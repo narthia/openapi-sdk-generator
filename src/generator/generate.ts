@@ -18,6 +18,7 @@ import { emitService } from "./emit/emit-service.ts";
 import { emitTypesFolder, partitionSchemas } from "./emit/emit-types.ts";
 import { buildIr } from "./ir.ts";
 import { loadSpec } from "./load.ts";
+import { kebabCase } from "./names.ts";
 
 /** Transports the generator knows how to emit or import. */
 const KNOWN_TRANSPORTS: readonly TransportName[] = ["http"];
@@ -52,19 +53,12 @@ export interface AuthOption {
   };
 }
 
-/** Options for {@link generateSdk}. */
-export interface GenerateOptions {
-  /** OpenAPI 3.0/3.1 spec: a file path, an http(s) URL, or an in-memory object. */
-  input: SpecInput;
+/** Options that apply to the whole generation run (shared across all inputs). */
+export interface SharedOptions {
   /** Output directory. When omitted, files are only returned in memory. */
   output?: string;
   /**
-   * Name of the generated SDK factory function.
-   * @default "createSdk"
-   */
-  name?: string;
-  /**
-   * Import specifier for the runtime package in generated code.
+   * Import specifier for the runtime package in generated code (used in `"package"` mode).
    * @default "@narthia/openapi-sdk-generator"
    */
   runtimePackage?: string;
@@ -75,22 +69,10 @@ export interface GenerateOptions {
    */
   importExtension?: "" | "js" | "ts";
   /**
-   * Case used to render a path/query param name that collides with another
-   * param or a request-body property: `"snake_case"` → `status_query`,
-   * `"camelCase"` → `statusQuery`. Request-body properties are never renamed.
-   * @default "snake_case"
-   */
-  collisionCase?: CollisionCase;
-  /**
-   * Auth the generated SDK exposes and applies. When omitted, auth schemes are
-   * derived from the spec's `components.securitySchemes` (if any); when neither
-   * is present, the SDK config uses the generic runtime `ClientConfig` auth.
-   */
-  auth?: AuthOption;
-  /**
    * Where the runtime (client core + transports) lives:
    * - `"generate"` (default): emit it into the SDK folder (`client/`, `transport/`)
-   *   so the output is self-contained with no dependency on this package.
+   *   so the output is self-contained with no dependency on this package. With
+   *   multiple inputs, one shared runtime is emitted at the output root.
    * - `"package"`: import it from {@link runtimePackage} instead.
    * @default "generate"
    */
@@ -103,6 +85,46 @@ export interface GenerateOptions {
    */
   transports?: TransportName[];
 }
+
+/** Options for a single generated SDK (one OpenAPI spec). */
+export interface TargetOptions {
+  /** OpenAPI 3.0/3.1 spec: a file path, an http(s) URL, or an in-memory object. */
+  input: SpecInput;
+  /**
+   * Name of the generated SDK factory function.
+   * @default "createSdk"
+   */
+  name?: string;
+  /**
+   * Auth the generated SDK exposes and applies. When omitted, auth schemes are
+   * derived from the spec's `components.securitySchemes` (if any); when neither
+   * is present, the SDK config uses the generic runtime `ClientConfig` auth.
+   */
+  auth?: AuthOption;
+  /**
+   * Case used to render a path/query param name that collides with another
+   * param or a request-body property: `"snake_case"` → `status_query`,
+   * `"camelCase"` → `statusQuery`. Request-body properties are never renamed.
+   * @default "snake_case"
+   */
+  collisionCase?: CollisionCase;
+}
+
+/**
+ * Options for {@link generateSdk}. Pass a single `input` (flat output under the
+ * output root) or an `inputs` map (each key becomes a subfolder that shares one
+ * emitted runtime). The two shapes are mutually exclusive.
+ */
+export type GenerateOptions =
+  | (SharedOptions & TargetOptions & { inputs?: never })
+  | (SharedOptions & {
+      /** One named SDK per key; each is emitted under `<kebab-key>/` sharing the root runtime. */
+      inputs: Record<string, TargetOptions>;
+      input?: never;
+      name?: never;
+      auth?: never;
+      collisionCase?: never;
+    });
 
 export interface GeneratedFile {
   /** Path relative to the output directory, e.g. `types/common.ts`. */
@@ -131,51 +153,127 @@ export interface GenerateResult {
  * ```
  */
 export async function generateSdk(options: GenerateOptions): Promise<GenerateResult> {
-  const spec = await loadSpec(options.input);
-  const mode = detectVersion(spec);
-  const ir = buildIr(spec, mode);
-
-  const ctx: EmitContext = {
+  const shared = {
     runtimePackage: options.runtimePackage ?? "@narthia/openapi-sdk-generator",
     importExtension: options.importExtension ?? "",
-    sdkName: options.name ?? "createSdk",
-    collisionCase: options.collisionCase ?? "snake_case",
-    auth: resolveAuthModel(options.auth, ir.authSchemes),
     runtime: options.runtime ?? "generate",
     transports: resolveTransports(options.transports),
-  };
+  } as const;
+  const targets = normalizeTargets(options);
 
-  const partition = partitionSchemas(ir);
   const files: GeneratedFile[] = [];
-
-  const typeFiles =
-    ir.schemas.length > 0 ? emitTypesFolder(ir, partition, ctx) : new Map<string, string>();
-  for (const [path, contents] of typeFiles) {
-    files.push({ path, contents });
+  const warnings: string[] = [];
+  for (const target of targets) {
+    const { files: targetFiles, warnings: targetWarnings } = await generateTarget(target, shared);
+    files.push(...targetFiles);
+    warnings.push(...targetWarnings);
   }
-  for (const service of ir.services) {
-    files.push({
-      path: `services/${service.fileName}.ts`,
-      contents: emitService(service, ctx),
-    });
-  }
-  files.push({ path: "config.ts", contents: emitConfig(ctx) });
-  files.push({ path: "index.ts", contents: emitIndex(ir, ctx, typeFiles.size > 0) });
 
-  // Self-contained mode: emit the client core + selected transports into the SDK.
-  if (ctx.runtime === "generate") {
-    for (const [path, contents] of emitRuntime(ctx)) files.push({ path, contents });
+  // Self-contained mode: emit the shared client core + transports once at the root.
+  if (shared.runtime === "generate") {
+    const runtimeCtx: EmitContext = {
+      ...shared,
+      sdkName: "createSdk",
+      collisionCase: "snake_case",
+      subdirDepth: 0,
+    };
+    for (const [path, contents] of emitRuntime(runtimeCtx)) files.push({ path, contents });
   }
 
   if (options.output !== undefined) {
     for (const file of files) {
-      const target = join(options.output, file.path);
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, file.contents, "utf8");
+      const outPath = join(options.output, file.path);
+      await mkdir(dirname(outPath), { recursive: true });
+      await writeFile(outPath, file.contents, "utf8");
     }
   }
 
+  return { files, warnings };
+}
+
+/** One SDK to generate: a spec plus its per-target options and output subfolder. */
+interface Target extends TargetOptions {
+  /** Output subfolder (`""` for a single/flat SDK, else the kebab-cased input key). */
+  subdir: string;
+}
+
+/** Shared (whole-run) options, with defaults applied. */
+type SharedResolved = {
+  runtimePackage: string;
+  importExtension: "" | "js" | "ts";
+  runtime: RuntimeMode;
+  transports: TransportName[];
+};
+
+/** Emit all files for one target, prefixing paths with its subfolder. */
+async function generateTarget(
+  target: Target,
+  shared: SharedResolved
+): Promise<{ files: GeneratedFile[]; warnings: string[] }> {
+  const spec = await loadSpec(target.input);
+  const ir = buildIr(spec, detectVersion(spec));
+
+  const ctx: EmitContext = {
+    ...shared,
+    sdkName: target.name ?? "createSdk",
+    collisionCase: target.collisionCase ?? "snake_case",
+    auth: resolveAuthModel(target.auth, ir.authSchemes),
+    subdirDepth: target.subdir === "" ? 0 : 1,
+  };
+
+  const prefix = target.subdir === "" ? "" : `${target.subdir}/`;
+  const files: GeneratedFile[] = [];
+  const partition = partitionSchemas(ir);
+
+  const typeFiles =
+    ir.schemas.length > 0 ? emitTypesFolder(ir, partition, ctx) : new Map<string, string>();
+  for (const [path, contents] of typeFiles) files.push({ path: `${prefix}${path}`, contents });
+  for (const service of ir.services) {
+    files.push({
+      path: `${prefix}services/${service.fileName}.ts`,
+      contents: emitService(service, ctx),
+    });
+  }
+  files.push({ path: `${prefix}config.ts`, contents: emitConfig(ctx) });
+  files.push({ path: `${prefix}index.ts`, contents: emitIndex(ir, ctx, typeFiles.size > 0) });
+
   return { files, warnings: ir.warnings };
+}
+
+/** Normalize the single-or-multi options into a list of targets (validated). */
+export function normalizeTargets(options: GenerateOptions): Target[] {
+  if ("inputs" in options && options.inputs !== undefined) {
+    if ("input" in options && options.input !== undefined) {
+      throw new Error("Pass either `input` (single) or `inputs` (multiple), not both.");
+    }
+    const entries = Object.entries(options.inputs);
+    if (entries.length === 0) throw new Error("`inputs` must contain at least one entry.");
+
+    const seen = new Set<string>();
+    return entries.map(([key, target]) => {
+      const subdir = kebabCase(key);
+      if (subdir === "")
+        throw new Error(`Invalid input key "${key}": produces an empty folder name.`);
+      if (seen.has(subdir)) {
+        throw new Error(`Input keys "${key}" and another collide on folder "${subdir}".`);
+      }
+      seen.add(subdir);
+      return { ...target, subdir };
+    });
+  }
+
+  if (!("input" in options) || options.input === undefined) {
+    throw new Error("Provide `input` (single) or `inputs` (multiple).");
+  }
+  return [
+    {
+      input: options.input,
+      name: options.name,
+      auth: options.auth,
+      collisionCase: options.collisionCase,
+      subdir: "",
+    },
+  ];
 }
 
 /** Validate and default the `transports` option against the known set. */

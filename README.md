@@ -83,6 +83,41 @@ const { files, warnings } = await generateSdk({
 
 Omit `output` to receive `files: { path, contents }[]` without writing to disk.
 
+### Multiple inputs (one shared runtime)
+
+For several related APIs (e.g. Jira + Confluence), pass an `inputs` map instead of a single `input`. Each key becomes a subfolder with its own SDK, auth, and types, and they **share one emitted runtime** at the output root (no per-input copy):
+
+```ts
+await generateSdk({
+  output: "./src/sdk",
+  inputs: {
+    jira: {
+      input: "./jira.json",
+      name: "createJira",
+      auth: { basic: { usernameField: "email", passwordField: "apiToken" } },
+    },
+    confluence: {
+      input: "./confluence.json",
+      ame: "createConfluence",
+      auth: { bearer: {} },
+    },
+  },
+});
+```
+
+```
+sdk/
+  client/  transport/http.ts   # shared runtime, emitted once
+  jira/        index.ts config.ts services/*.ts types/*.ts
+  confluence/  index.ts config.ts services/*.ts types/*.ts
+```
+
+Then import per input: `import { createJira } from "./sdk/jira"`, `import { getIssue } from "./sdk/jira/services/issues"`.
+
+- `input` and `inputs` are mutually exclusive; a single `input` keeps the flat layout (no subfolder).
+- **Shared** across all inputs: `output`, `runtime`, `transports`, `importExtension`, `runtimePackage`. **Per input**: `input`, `name`, `auth`, `collisionCase`.
+- Via the CLI, multiple inputs are configured through a [config file](#config-file)'s `inputs` map (shared flags still override); the per-input flags apply only to a single `--input` run.
+
 ## Use the generated SDK
 
 Two imports: one to initialize the client, one for the transport.
@@ -158,7 +193,7 @@ await client.pets.getPetById(
   { petId: 42 },
   {
     extensions: { fetchOptions: { next: { revalidate: 60 } } },
-  }
+  },
 );
 ```
 

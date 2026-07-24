@@ -48,6 +48,17 @@ export interface EmitContext {
   runtime: RuntimeMode;
   /** Transports emitted into the SDK in `"generate"` mode; the first is the default. */
   transports: TransportName[];
+  /** How many folder levels this SDK sits below the output root (0 = flat, 1 = under `<subdir>/` for multi-input). */
+  subdirDepth: number;
+}
+
+/**
+ * Relative base from an emitted file to the shared `client/` directory at the
+ * output root. `depth` is how many levels the file sits below the root:
+ * `0` → `"./client"`, `1` → `"../client"`, `2` → `"../../client"`, ...
+ */
+export function clientBase(depth: number): string {
+  return depth === 0 ? "./client" : `${"../".repeat(depth)}client`;
 }
 
 /**

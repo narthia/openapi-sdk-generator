@@ -32,5 +32,8 @@ jobs:
       - name: Check formatting, lint, and types
         run: vp check
 
+      - name: Run tests
+        run: vp test
+
       - name: Build package
         run: vp run build

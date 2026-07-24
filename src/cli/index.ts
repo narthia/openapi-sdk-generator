@@ -148,30 +148,50 @@ export async function runCli(
     return 1;
   }
 
-  // Flags override config; config fills the rest; generateSdk applies its own defaults.
-  const input = values.input ?? fileConfig.input;
+  // Shared options: CLI flags override the config file.
   const output = values.output ?? fileConfig.output;
-  if (input === undefined || output === undefined) {
-    io.err("Error: both input and output are required (via --input/--output or a config file).");
-    io.err('Run "openapi-sdk-generator --help" for usage.');
-    return 1;
-  }
+  const shared = {
+    output,
+    runtimePackage: values.runtime ?? fileConfig.runtimePackage,
+    importExtension:
+      (importExtension as "" | "js" | "ts" | undefined) ?? fileConfig.importExtension,
+    runtime: (runtimeMode as RuntimeMode | undefined) ?? fileConfig.runtime,
+    transports: (transports as TransportName[] | undefined) ?? fileConfig.transports,
+  };
 
-  try {
-    const result = await generateSdk({
+  // Multi-input is config-file only: per-input auth/name/collisionCase come from
+  // the config; shared flags above still override. CLI flags for a single input
+  // (--input, --auth-*, --name, --collision-case) don't apply here.
+  const multiInputs =
+    fileConfig.inputs && Object.keys(fileConfig.inputs).length > 0 ? fileConfig.inputs : undefined;
+
+  let generateOptions: GenerateOptions;
+  if (multiInputs) {
+    if (output === undefined) {
+      io.err("Error: output is required (via --output or the config file).");
+      io.err('Run "openapi-sdk-generator --help" for usage.');
+      return 1;
+    }
+    generateOptions = { ...shared, inputs: multiInputs };
+  } else {
+    const input = values.input ?? fileConfig.input;
+    if (input === undefined || output === undefined) {
+      io.err("Error: both input and output are required (via --input/--output or a config file).");
+      io.err('Run "openapi-sdk-generator --help" for usage.');
+      return 1;
+    }
+    generateOptions = {
+      ...shared,
       input,
-      output,
       name: values.name ?? fileConfig.name,
-      runtimePackage: values.runtime ?? fileConfig.runtimePackage,
-      importExtension:
-        (importExtension as "" | "js" | "ts" | undefined) ?? fileConfig.importExtension,
       collisionCase:
         (collisionCase as "snake_case" | "camelCase" | undefined) ?? fileConfig.collisionCase,
       auth: authResult.auth ?? fileConfig.auth,
-      runtime: (runtimeMode as RuntimeMode | undefined) ?? fileConfig.runtime,
-      transports: (transports as TransportName[] | undefined) ?? fileConfig.transports,
-    });
+    };
+  }
 
+  try {
+    const result = await generateSdk(generateOptions);
     for (const warning of result.warnings) io.err(`Warning: ${warning}`);
     io.out(`Generated ${result.files.length} file(s) into ${output}`);
     return 0;
