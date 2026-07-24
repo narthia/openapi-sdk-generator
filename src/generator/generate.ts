@@ -5,15 +5,22 @@ import type {
   EmitContext,
   ResolvedAuth,
   ResolvedAuthScheme,
+  RuntimeMode,
+  TransportName,
 } from "./emit/ts-writer.ts";
 import type { IrAuthScheme } from "./ir.ts";
 import type { SpecInput } from "./load.ts";
 import { detectVersion } from "./detect.ts";
+import { emitConfig } from "./emit/emit-config.ts";
 import { emitIndex } from "./emit/emit-index.ts";
+import { emitRuntime } from "./emit/emit-runtime.ts";
 import { emitService } from "./emit/emit-service.ts";
 import { emitTypesFolder, partitionSchemas } from "./emit/emit-types.ts";
 import { buildIr } from "./ir.ts";
 import { loadSpec } from "./load.ts";
+
+/** Transports the generator knows how to emit or import. */
+const KNOWN_TRANSPORTS: readonly TransportName[] = ["http"];
 
 /**
  * Generate-time auth configuration for the emitted SDK. Each present key enables
@@ -80,6 +87,21 @@ export interface GenerateOptions {
    * is present, the SDK config uses the generic runtime `ClientConfig` auth.
    */
   auth?: AuthOption;
+  /**
+   * Where the runtime (client core + transports) lives:
+   * - `"generate"` (default): emit it into the SDK folder (`client/`, `transport/`)
+   *   so the output is self-contained with no dependency on this package.
+   * - `"package"`: import it from {@link runtimePackage} instead.
+   * @default "generate"
+   */
+  runtime?: RuntimeMode;
+  /**
+   * Transports emitted into the SDK in `"generate"` mode; the first entry is the
+   * default transport. Ignored in `"package"` mode (transports are imported from
+   * the package there).
+   * @default ["http"]
+   */
+  transports?: TransportName[];
 }
 
 export interface GeneratedFile {
@@ -119,6 +141,8 @@ export async function generateSdk(options: GenerateOptions): Promise<GenerateRes
     sdkName: options.name ?? "createSdk",
     collisionCase: options.collisionCase ?? "snake_case",
     auth: resolveAuthModel(options.auth, ir.authSchemes),
+    runtime: options.runtime ?? "generate",
+    transports: resolveTransports(options.transports),
   };
 
   const partition = partitionSchemas(ir);
@@ -135,7 +159,13 @@ export async function generateSdk(options: GenerateOptions): Promise<GenerateRes
       contents: emitService(service, ctx),
     });
   }
+  files.push({ path: "config.ts", contents: emitConfig(ctx) });
   files.push({ path: "index.ts", contents: emitIndex(ir, ctx, typeFiles.size > 0) });
+
+  // Self-contained mode: emit the client core + selected transports into the SDK.
+  if (ctx.runtime === "generate") {
+    for (const [path, contents] of emitRuntime(ctx)) files.push({ path, contents });
+  }
 
   if (options.output !== undefined) {
     for (const file of files) {
@@ -146,6 +176,22 @@ export async function generateSdk(options: GenerateOptions): Promise<GenerateRes
   }
 
   return { files, warnings: ir.warnings };
+}
+
+/** Validate and default the `transports` option against the known set. */
+export function resolveTransports(transports: TransportName[] | undefined): TransportName[] {
+  if (transports === undefined) return ["http"];
+  if (transports.length === 0) {
+    throw new Error("`transports` must list at least one transport.");
+  }
+  for (const name of transports) {
+    if (!KNOWN_TRANSPORTS.includes(name)) {
+      throw new Error(
+        `Unknown transport "${name}"; supported transports: ${KNOWN_TRANSPORTS.join(", ")}.`
+      );
+    }
+  }
+  return transports;
 }
 
 /**

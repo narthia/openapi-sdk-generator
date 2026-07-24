@@ -3,6 +3,7 @@
 import { createRequire } from "node:module";
 import { parseArgs } from "node:util";
 import type { AuthOption, GenerateOptions } from "../generator/generate.ts";
+import type { RuntimeMode, TransportName } from "./../generator/emit/ts-writer.ts";
 import { generateSdk } from "../generator/generate.ts";
 import { loadConfig, resolveConfigPath } from "./load-config.ts";
 
@@ -30,6 +31,8 @@ Options:
       --runtime <pkg>      Runtime import specifier (default: @narthia/openapi-sdk-generator)
       --import-ext <ext>   Relative-import extension: "" | js | ts (default: "")
       --collision-case <c> Case for renamed colliding path/query params: snake_case | camelCase (default: snake_case)
+      --runtime-mode <m>   Where the runtime lives: generate (into the SDK) | package (default: generate)
+      --transports <list>  Comma-separated transports to generate (default: http); first is the default
   -h, --help               Show this help
   -v, --version            Print the version
 
@@ -74,6 +77,8 @@ export async function runCli(
         runtime: { type: "string" },
         "import-ext": { type: "string" },
         "collision-case": { type: "string" },
+        "runtime-mode": { type: "string" },
+        transports: { type: "string" },
         "auth-type": { type: "string" },
         "basic-username-field": { type: "string" },
         "basic-password-field": { type: "string" },
@@ -114,6 +119,20 @@ export async function runCli(
     return 1;
   }
 
+  const runtimeMode = values["runtime-mode"];
+  if (runtimeMode !== undefined && runtimeMode !== "package" && runtimeMode !== "generate") {
+    io.err(`Error: --runtime-mode must be one of "package" or "generate" (got "${runtimeMode}").`);
+    return 1;
+  }
+
+  const transportsFlag = values.transports;
+  const transports = transportsFlag
+    ? transportsFlag
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
+    : undefined;
+
   const authResult = buildAuthOption(values);
   if (authResult.error) {
     io.err(`Error: ${authResult.error}`);
@@ -149,6 +168,8 @@ export async function runCli(
       collisionCase:
         (collisionCase as "snake_case" | "camelCase" | undefined) ?? fileConfig.collisionCase,
       auth: authResult.auth ?? fileConfig.auth,
+      runtime: (runtimeMode as RuntimeMode | undefined) ?? fileConfig.runtime,
+      transports: (transports as TransportName[] | undefined) ?? fileConfig.transports,
     });
 
     for (const warning of result.warnings) io.err(`Warning: ${warning}`);

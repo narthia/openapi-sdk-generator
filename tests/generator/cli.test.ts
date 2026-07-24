@@ -64,6 +64,37 @@ describe("runCli", () => {
     expect(err.join("\n")).toContain("--help");
   });
 
+  it("rejects invalid --runtime-mode", async () => {
+    const { io, err } = captureIo();
+    const out = await makeOut();
+    expect(await runCli(["-i", fixture, "-o", out, "--runtime-mode", "vendor"], io)).toBe(1);
+    expect(err.join("\n")).toContain("--runtime-mode must be one of");
+  });
+
+  it("rejects an unknown --transports value", async () => {
+    const { io, err } = captureIo();
+    const out = await makeOut();
+    expect(await runCli(["-i", fixture, "-o", out, "--transports", "grpc"], io)).toBe(1);
+    expect(err.join("\n")).toContain('Unknown transport "grpc"');
+  });
+
+  it("--runtime-mode package imports from the package", async () => {
+    const { io } = captureIo();
+    const outDir = await makeOut();
+    expect(await runCli(["-i", fixture, "-o", outDir, "--runtime-mode", "package"], io)).toBe(0);
+    const config = await readFile(join(outDir, "config.ts"), "utf8");
+    expect(config).toContain('from "@narthia/openapi-sdk-generator/client"');
+    await expect(stat(join(outDir, "client"))).rejects.toThrow(/ENOENT/);
+  });
+
+  it("defaults to generate mode (self-contained)", async () => {
+    const { io } = captureIo();
+    const outDir = await makeOut();
+    expect(await runCli(["-i", fixture, "-o", outDir], io)).toBe(0);
+    await expect(stat(join(outDir, "client", "client.ts"))).resolves.toBeDefined();
+    await expect(stat(join(outDir, "transport", "http.ts"))).resolves.toBeDefined();
+  });
+
   it("generates files to disk and reports the count", async () => {
     const { io, out } = captureIo();
     const outDir = await makeOut();
@@ -102,9 +133,9 @@ describe("runCli", () => {
         io
       )
     ).toBe(0);
-    const index = await readFile(join(outDir, "index.ts"), "utf8");
-    expect(index).toContain("email: string;");
-    expect(index).toContain("apitoken: string;");
+    const config = await readFile(join(outDir, "config.ts"), "utf8");
+    expect(config).toContain("email: string;");
+    expect(config).toContain("apitoken: string;");
   });
 });
 

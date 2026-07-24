@@ -2,6 +2,27 @@
 
 import type { ClientContext } from "@narthia/openapi-sdk-generator/client";
 
+/**
+ * Health check
+ *
+ * @returns Service health
+ */
+export function getHealth(ctx: ClientContext, options?: {
+  headers?: Record<string, string | number | boolean>;
+  signal?: AbortSignal;
+  extensions?: Record<string, unknown>;
+}): Promise<{
+  status?: "ok" | "degraded";
+}> {
+  return ctx.request({
+    method: "get",
+    path: "/health",
+    headers: options?.headers,
+    signal: options?.signal,
+    extensions: options?.extensions,
+  });
+}
+
 /** Operations of the `health` service. */
 export function createHealthService(ctx: ClientContext) {
   return {
@@ -17,13 +38,7 @@ export function createHealthService(ctx: ClientContext) {
     }): Promise<{
       status?: "ok" | "degraded";
     }> {
-      return ctx.request({
-        method: "get",
-        path: "/health",
-        headers: options?.headers,
-        signal: options?.signal,
-        extensions: options?.extensions,
-      });
+      return getHealth(ctx, options);
     },
   };
 }

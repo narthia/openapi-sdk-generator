@@ -1,7 +1,7 @@
 import { rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import type { Transport, TransportRequest } from "../../src/client/index.ts";
+import type { ClientContext, Transport, TransportRequest } from "../../src/client/index.ts";
 import { generateSdk } from "../../src/index.ts";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -44,6 +44,7 @@ describe("end-to-end: generate, import, and call", () => {
       output: outDir,
       // Resolve the runtime import against this repo's source so the dynamically
       // imported SDK links to the same client core the test uses.
+      runtime: "package",
       runtimePackage: `${repoRoot.replace(/\/$/, "")}/src`,
       importExtension: "ts",
     });
@@ -110,6 +111,37 @@ describe("end-to-end: generate, import, and call", () => {
     expect((error as InstanceType<typeof ApiError>).body).toEqual({
       code: 404,
       message: "not found",
+    });
+  });
+
+  it("generate mode: a standalone op drives a request through the inlined runtime", async () => {
+    const genDir = fileURLToPath(new URL("./__e2e_gen__/sdk", import.meta.url));
+    // Default runtime: "generate" — self-contained; import the inlined runtime + a single op.
+    await generateSdk({ input: fixture, output: genDir, importExtension: "ts" });
+
+    const { createClient } = (await import(`${genDir}/config.ts`)) as {
+      createClient: (config: { baseUrl?: string; transport?: Transport }) => ClientContext;
+    };
+    const { getPetById } = (await import(`${genDir}/services/pets.ts`)) as {
+      getPetById: (
+        ctx: ClientContext,
+        params: { petId: number },
+        options?: { signal?: AbortSignal }
+      ) => Promise<unknown>;
+    };
+
+    const { transport, requests } = stubTransport((req) =>
+      req.path === "/pets/7" ? { body: JSON.stringify({ id: 7, name: "Rex" }) } : {}
+    );
+    const ctx = createClient({ baseUrl: "https://api.example.com", transport });
+
+    const pet = await getPetById(ctx, { petId: 7 });
+    expect(pet).toEqual({ id: 7, name: "Rex" });
+    expect(requests[0]!.path).toBe("/pets/7");
+
+    await rm(fileURLToPath(new URL("./__e2e_gen__", import.meta.url)), {
+      recursive: true,
+      force: true,
     });
   });
 });

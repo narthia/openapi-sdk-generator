@@ -140,9 +140,9 @@ describe("runCli with a config file", () => {
 
     const { io } = captureIo();
     expect(await runCli(["-c", cfg], io)).toBe(0);
-    const index = await readFile(join(outDir, "index.ts"), "utf8");
-    expect(index).toContain("email: string;");
-    expect(index).toContain("apiToken: string;");
+    const config = await readFile(join(outDir, "config.ts"), "utf8");
+    expect(config).toContain("email: string;");
+    expect(config).toContain("apiToken: string;");
   });
 
   it("lets CLI auth flags override config auth", async () => {
@@ -153,9 +153,9 @@ describe("runCli with a config file", () => {
 
     const { io } = captureIo();
     expect(await runCli(["-c", cfg, "--auth-type", "bearer"], io)).toBe(0);
-    const index = await readFile(join(outDir, "index.ts"), "utf8");
-    expect(index).toContain("token: ValueOrFactory;");
-    expect(index).not.toContain("username: string;");
+    const config = await readFile(join(outDir, "config.ts"), "utf8");
+    expect(config).toContain("token: ValueOrFactory;");
+    expect(config).not.toContain("username: string;");
   });
 
   it("errors when input/output are absent from both flags and config", async () => {

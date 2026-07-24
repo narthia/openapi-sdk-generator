@@ -11,7 +11,8 @@ const execFileAsync = promisify(execFile);
 const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
 
 describe("generateSdk emit (petstore)", () => {
-  const generate = () => generateSdk({ input: fixture("petstore-3.0.json") });
+  // Package mode keeps these snapshots focused on codegen (no inlined runtime).
+  const generate = () => generateSdk({ input: fixture("petstore-3.0.json"), runtime: "package" });
 
   it("emits the expected file tree", async () => {
     const { files, warnings } = await generate();
@@ -24,6 +25,7 @@ describe("generateSdk emit (petstore)", () => {
       "services/pets.ts",
       "services/store.ts",
       "services/health.ts",
+      "config.ts",
       "index.ts",
     ]);
     expect(warnings).toEqual([]);
@@ -52,15 +54,20 @@ describe("generateSdk emit (petstore)", () => {
       name: "createPetstore",
       runtimePackage: "my-runtime",
       importExtension: "js",
+      runtime: "package",
     });
     const index = files.find((f) => f.path === "index.ts")!.contents;
-    expect(index).toContain('from "my-runtime/client"');
-    expect(index).toContain("export function createPetstore(config: ClientConfig = {})");
+    expect(index).toContain('from "./config.js"');
+    expect(index).toContain("export function createPetstore(config: SdkConfig = {})");
     expect(index).toContain(
       "export type CreatePetstoreClient = ReturnType<typeof createPetstore>;"
     );
     expect(index).toContain('from "./services/pets.js"');
     expect(index).toContain('from "./types/index.js"');
+
+    // The runtimePackage specifier lands in the config module (package mode).
+    const config = files.find((f) => f.path === "config.ts")!.contents;
+    expect(config).toContain('from "my-runtime/client"');
 
     const service = files.find((f) => f.path === "services/pets.ts")!.contents;
     expect(service).toContain('from "../types/index.js"');
@@ -226,23 +233,15 @@ describe("type partitioning", () => {
 });
 
 describe("generated code validity", () => {
-  let dir: string;
+  const dirs: string[] = [];
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const tsc = join(repoRoot, "node_modules/.bin/tsc");
 
   afterAll(async () => {
-    if (dir) await rm(dir, { recursive: true, force: true });
+    await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
   });
 
-  it("passes tsc --noEmit", async () => {
-    dir = await mkdtemp(join(tmpdir(), "narthia-sdk-gen-"));
-    await generateSdk({
-      input: fixture("petstore-3.0.json"),
-      output: join(dir, "sdk"),
-      // Point the runtime import at this repo's sources so tsc can resolve it
-      // without a package install.
-      runtimePackage: "@narthia/openapi-sdk-generator",
-    });
-
-    const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const writeTsconfig = async (dir: string, paths?: Record<string, string[]>) => {
     await writeFile(
       join(dir, "tsconfig.json"),
       JSON.stringify({
@@ -255,16 +254,35 @@ describe("generated code validity", () => {
           moduleResolution: "bundler",
           allowImportingTsExtensions: true,
           lib: ["es2023", "dom", "dom.iterable"],
-          paths: {
-            "@narthia/openapi-sdk-generator/client": [join(repoRoot, "src/client/index.ts")],
-          },
+          ...(paths ? { paths } : {}),
         },
         include: ["sdk/**/*.ts"],
       }),
       "utf8"
     );
+  };
 
-    const tsc = join(repoRoot, "node_modules/.bin/tsc");
+  it("generate mode: self-contained output compiles with NO package mapping", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "narthia-sdk-gen-"));
+    dirs.push(dir);
+    // Default runtime: "generate" — the runtime is inlined, so tsc needs no paths.
+    await generateSdk({ input: fixture("petstore-3.0.json"), output: join(dir, "sdk") });
+    await writeTsconfig(dir);
+    await expect(execFileAsync(tsc, ["-p", dir], { cwd: dir })).resolves.toBeDefined();
+  }, 60_000);
+
+  it("package mode: compiles against the runtime package", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "narthia-sdk-pkg-"));
+    dirs.push(dir);
+    await generateSdk({
+      input: fixture("petstore-3.0.json"),
+      output: join(dir, "sdk"),
+      runtime: "package",
+      runtimePackage: "@narthia/openapi-sdk-generator",
+    });
+    await writeTsconfig(dir, {
+      "@narthia/openapi-sdk-generator/client": [join(repoRoot, "src/client/index.ts")],
+    });
     await expect(execFileAsync(tsc, ["-p", dir], { cwd: dir })).resolves.toBeDefined();
   }, 60_000);
 });

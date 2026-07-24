@@ -28,9 +28,12 @@ function spec(securitySchemes?: Record<string, unknown>): Record<string, unknown
   };
 }
 
-async function generateIndex(auth: AuthOption | undefined, input = spec()): Promise<string> {
+async function generateFiles(
+  auth: AuthOption | undefined,
+  input = spec()
+): Promise<(path: string) => string> {
   const { files } = await generateSdk({ input, auth });
-  return files.find((f) => f.path === "index.ts")!.contents;
+  return (path: string) => files.find((f) => f.path === path)!.contents;
 }
 
 describe("resolveAuthModel", () => {
@@ -93,46 +96,54 @@ describe("resolveAuthModel", () => {
 
 describe("emitted auth config", () => {
   it("emits a flat config and adapter for a single renamed basic scheme", async () => {
-    const index = await generateIndex({
+    const get = await generateFiles({
       basic: { usernameField: "email", passwordField: "apitoken" },
     });
-    expect(index).toContain("export interface CreateSdkAuthConfig {");
-    expect(index).toContain("email: string;");
-    expect(index).toContain("apitoken: string;");
-    expect(index).toContain(
+    const config = get("config.ts");
+    expect(config).toContain("export interface CreateSdkAuthConfig {");
+    expect(config).toContain("email: string;");
+    expect(config).toContain("apitoken: string;");
+    expect(config).toContain(
       'return { type: "basic", username: auth.email, password: auth.apitoken };'
     );
-    expect(index).toContain('config: Omit<ClientConfig, "auth"> & { auth?: CreateSdkAuthConfig }');
-    expect(index).not.toContain("AuthConfig[]");
+    expect(config).toContain(
+      'export type SdkConfig = Omit<ClientConfig, "auth"> & { auth?: CreateSdkAuthConfig };'
+    );
+    expect(config).not.toContain("AuthConfig[]");
+    // index wires createSdk against the shared config.
+    expect(get("index.ts")).toContain("export function createSdk(config: SdkConfig = {})");
   });
 
   it("emits a discriminated union for multiple schemes (pick one)", async () => {
-    const index = await generateIndex({ basic: {}, bearer: {} });
-    expect(index).toContain(
+    const config = (await generateFiles({ basic: {}, bearer: {} }))("config.ts");
+    expect(config).toContain(
       "export type CreateSdkAuthConfig = CreateSdkAuthConfigBasic | CreateSdkAuthConfigBearer;"
     );
-    expect(index).toContain('type: "basic";');
-    expect(index).toContain("switch (auth.type) {");
-    expect(index).toContain("function toRuntimeAuth(auth: CreateSdkAuthConfig): AuthConfig {");
+    expect(config).toContain('type: "basic";');
+    expect(config).toContain("switch (auth.type) {");
+    expect(config).toContain("function toRuntimeAuth(auth: CreateSdkAuthConfig): AuthConfig {");
   });
 
   it("omits auth codegen entirely when nothing is configured", async () => {
-    const index = await generateIndex(undefined);
-    expect(index).toContain("export function createSdk(config: ClientConfig = {})");
-    expect(index).not.toContain("toRuntimeAuth");
+    const get = await generateFiles(undefined);
+    expect(get("config.ts")).toContain("export type SdkConfig = ClientConfig;");
+    expect(get("config.ts")).not.toContain("toRuntimeAuth");
+    expect(get("index.ts")).toContain("export function createSdk(config: SdkConfig = {})");
   });
 
   it("derives auth from the spec's securitySchemes as a fallback", async () => {
-    const index = await generateIndex(
-      undefined,
-      spec({
-        ApiKeyAuth: { type: "apiKey", in: "header", name: "X-API-Key" },
-        BearerAuth: { type: "http", scheme: "bearer" },
-      })
-    );
-    expect(index).toContain("toRuntimeAuth");
-    expect(index).toContain('name: "X-API-Key"');
-    expect(index).toContain("switch (auth.type) {");
+    const config = (
+      await generateFiles(
+        undefined,
+        spec({
+          ApiKeyAuth: { type: "apiKey", in: "header", name: "X-API-Key" },
+          BearerAuth: { type: "http", scheme: "bearer" },
+        })
+      )
+    )("config.ts");
+    expect(config).toContain("toRuntimeAuth");
+    expect(config).toContain('name: "X-API-Key"');
+    expect(config).toContain("switch (auth.type) {");
   });
 });
 

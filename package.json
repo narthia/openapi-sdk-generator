@@ -33,6 +33,8 @@
   },
   "files": [
     "dist",
+    "src/client",
+    "src/transports",
     "README.md",
     "CHANGELOG.md"
   ],

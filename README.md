@@ -21,23 +21,25 @@ npm install @narthia/openapi-sdk-generator
 npx openapi-sdk-generator --input ./openapi.json --output ./src/sdk
 ```
 
-| Flag                            | Description                                                                                                 |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `-i, --input <path\|url>`       | OpenAPI 3.0/3.1 spec - a JSON file path or an `http(s)` URL (**required\***)                                |
-| `-o, --output <dir>`            | Directory to write the generated SDK into (**required\***)                                                  |
-| `-c, --config <path>`           | Config file (default: auto-discover `openapi-sdk.config.{ts,mjs,js,json}`, see [Config file](#config-file)) |
-| `-n, --name <name>`             | Name of the generated factory (default: `createSdk`)                                                        |
-| `--runtime <pkg>`               | Runtime import specifier (default: `@narthia/openapi-sdk-generator`)                                        |
-| `--import-ext <ext>`            | Relative-import extension in emitted code: `""`, `js`, or `ts` (default: `""`)                              |
-| `--collision-case <case>`       | Case for renamed colliding path/query params: `snake_case` or `camelCase` (default: `snake_case`)           |
-| `--auth-type <list>`            | Comma-separated auth schemes to generate: `bearer`, `basic`, `apiKey` (see [Auth](#auth))                   |
-| `--basic-username-field <name>` | Rename basic auth's `username` config field (e.g. `email`)                                                  |
-| `--basic-password-field <name>` | Rename basic auth's `password` config field (e.g. `apitoken`)                                               |
-| `--bearer-field <name>`         | Rename the bearer `token` config field                                                                      |
-| `--apikey-field <name>`         | Rename the apiKey `value` config field                                                                      |
-| `--apikey-in <where>`           | apiKey location: `header` or `query` (default: `header`)                                                    |
-| `--apikey-name <name>`          | apiKey header/query parameter name (required when generating an `apiKey` scheme)                            |
-| `-h, --help` / `-v, --version`  | Show help / print version                                                                                   |
+| Flag                            | Description                                                                                                                               |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `-i, --input <path\|url>`       | OpenAPI 3.0/3.1 spec - a JSON file path or an `http(s)` URL (**required\***)                                                              |
+| `-o, --output <dir>`            | Directory to write the generated SDK into (**required\***)                                                                                |
+| `-c, --config <path>`           | Config file (default: auto-discover `openapi-sdk.config.{ts,mjs,js,json}`, see [Config file](#config-file))                               |
+| `-n, --name <name>`             | Name of the generated factory (default: `createSdk`)                                                                                      |
+| `--runtime-mode <mode>`         | `generate` (inline the runtime into the SDK) or `package` (import it) (default: `generate`, see [Runtime](#runtime-package-vs-generated)) |
+| `--transports <list>`           | Comma-separated transports to generate; first is the default (default: `http`)                                                            |
+| `--runtime <pkg>`               | Runtime import specifier used in `package` mode (default: `@narthia/openapi-sdk-generator`)                                               |
+| `--import-ext <ext>`            | Relative-import extension in emitted code: `""`, `js`, or `ts` (default: `""`)                                                            |
+| `--collision-case <case>`       | Case for renamed colliding path/query params: `snake_case` or `camelCase` (default: `snake_case`)                                         |
+| `--auth-type <list>`            | Comma-separated auth schemes to generate: `bearer`, `basic`, `apiKey` (see [Auth](#auth))                                                 |
+| `--basic-username-field <name>` | Rename basic auth's `username` config field (e.g. `email`)                                                                                |
+| `--basic-password-field <name>` | Rename basic auth's `password` config field (e.g. `apitoken`)                                                                             |
+| `--bearer-field <name>`         | Rename the bearer `token` config field                                                                                                    |
+| `--apikey-field <name>`         | Rename the apiKey `value` config field                                                                                                    |
+| `--apikey-in <where>`           | apiKey location: `header` or `query` (default: `header`)                                                                                  |
+| `--apikey-name <name>`          | apiKey header/query parameter name (required when generating an `apiKey` scheme)                                                          |
+| `-h, --help` / `-v, --version`  | Show help / print version                                                                                                                 |
 
 \* `input` and `output` may come from a [config file](#config-file) instead of flags; flags override the config.
 
@@ -192,12 +194,47 @@ Anything that varies per request goes in the second `options` argument (`headers
 ```
 sdk/
   index.ts              # createSdk(config) wiring all services
-  services/<name>.ts    # one factory per tag/service, methods with JSDoc
+  config.ts             # createClient + SdkConfig (applies your auth); tree-shakeable entry
+  services/<name>.ts    # standalone op functions + one factory per tag/service
   types/
     common.ts           # types shared by 2+ services
     <service>.ts        # types used by a single service
     index.ts            # barrel - import type { X } from "../types"
+  client/               # generate mode only: the inlined runtime core
+  transport/<name>.ts   # generate mode only: the inlined transport(s)
 ```
+
+## Runtime: package vs generated
+
+By default the SDK is **self-contained**: the runtime (client core + transport) is emitted into the output (`client/`, `transport/`), so the generated code has **no dependency** on this package. Control it with `runtime` (`generateSdk`) or `--runtime-mode`:
+
+- `"generate"` (default) - inline the runtime. Imports resolve to `./client` and `./transport/http`; nothing points at `@narthia/openapi-sdk-generator`.
+- `"package"` - import the runtime from the package (`runtimePackage`, default `@narthia/openapi-sdk-generator`). Smaller output; the consumer installs this package. Use when you generate several SDKs in one app and want a single shared runtime.
+
+```ts
+await generateSdk({ input, output }); // self-contained (default)
+await generateSdk({ input, output, runtime: "package" }); // import from the package
+```
+
+`transports` selects which transports to inline in `"generate"` mode (default `["http"]`); the first entry is the default transport. In `"package"` mode transports are imported from the package instead.
+
+## Tree-shaking
+
+Each operation is emitted **twice**: as a method on the ergonomic `createSdk` object, and as a **standalone function** that takes the client as its first argument. Bundlers can drop unused module exports (but not unused object properties), so importing standalone functions bundles only what you call:
+
+```ts
+// Ergonomic - convenient, but pulls in every service/method:
+const pet = await createSdk(config).pets.getPetById({ petId: 42 });
+
+// Tree-shakeable - only getPetById (and the runtime) end up in your bundle:
+import { createClient } from "./sdk/config";
+import { getPetById } from "./sdk/services/pets";
+
+const ctx = createClient({ baseUrl, auth: { email, apiToken } });
+const pet = await getPetById(ctx, { petId: 42 });
+```
+
+Import `createClient` from **`./sdk/config`** (not `./sdk/client`): the `config` module applies your generated auth (field renames + scheme selection), so `createClient` there accepts the same tailored `auth` as `createSdk`. It's a service-free module, so importing it stays tree-shakeable. `import * as pets from "./sdk/services/pets"` then `pets.getPetById(ctx, ...)` tree-shakes too. The standalone functions take `ctx` first (you can't have both a no-client-argument call and tree-shaking); `createSdk` remains for the grouped, no-`ctx` ergonomics.
 
 ## Auth
 

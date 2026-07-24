@@ -8,6 +8,16 @@ const INDENT = "  ";
 /** Case style for the suffix applied to a collided path/query param name. */
 export type CollisionCase = "snake_case" | "camelCase";
 
+/** A transport the generator can emit or import. */
+export type TransportName = "http";
+
+/**
+ * Where the runtime (client core + transports) comes from in generated code:
+ * `"generate"` emits it into the SDK folder (self-contained); `"package"` imports
+ * it from {@link EmitContext.runtimePackage}.
+ */
+export type RuntimeMode = "package" | "generate";
+
 /**
  * A fully resolved auth scheme (all field-name defaults applied) that the index
  * emitter turns into a bespoke config type and a runtime-auth adapter.
@@ -34,6 +44,26 @@ export interface EmitContext {
   collisionCase: CollisionCase;
   /** Resolved auth model, or `undefined` to emit the generic runtime `ClientConfig`. */
   auth?: ResolvedAuth;
+  /** Whether the runtime is emitted into the SDK (`"generate"`) or imported from the package (`"package"`). */
+  runtime: RuntimeMode;
+  /** Transports emitted into the SDK in `"generate"` mode; the first is the default. */
+  transports: TransportName[];
+}
+
+/**
+ * Import specifier for the runtime `client` module: the package subpath in
+ * `"package"` mode, or a relative path to the emitted `client/` in `"generate"`
+ * mode. `relBase` is the extensionless relative path from the emitting file to
+ * the generated `client` directory (e.g. `"./client"` or `"../client"`).
+ */
+export function runtimeClientImport(ctx: EmitContext, relBase: string): string {
+  if (ctx.runtime === "generate") return relativeImport(ctx, relBase, true);
+  return `${ctx.runtimePackage}/client`;
+}
+
+/** The default transport in `"generate"` mode (first entry). */
+export function defaultTransport(ctx: EmitContext): TransportName {
+  return ctx.transports[0] ?? "http";
 }
 
 /** Render a relative import specifier honoring the configured extension. */

@@ -5,7 +5,7 @@ import { collectRefs } from "../ir.ts";
 import { buildJsDoc } from "../jsdoc.ts";
 import { camelCase, propertyKey, snakeCase } from "../names.ts";
 import { GENERATED_HEADER, operationTypes } from "./emit-types.ts";
-import { printProperty, printType, relativeImport } from "./ts-writer.ts";
+import { printProperty, printType, relativeImport, runtimeClientImport } from "./ts-writer.ts";
 
 export function emitService(service: IrService, ctx: EmitContext): string {
   const usedTypes = new Set<string>();
@@ -14,13 +14,21 @@ export function emitService(service: IrService, ctx: EmitContext): string {
   }
 
   const parts: string[] = [GENERATED_HEADER, ""];
-  parts.push(`import type { ClientContext } from "${ctx.runtimePackage}/client";`);
+  parts.push(`import type { ClientContext } from "${runtimeClientImport(ctx, "../client")}";`);
   if (usedTypes.size > 0) {
     const names = [...usedTypes].sort().join(", ");
     parts.push(`import type { ${names} } from "${relativeImport(ctx, "../types", true)}";`);
   }
   parts.push("");
 
+  // Standalone, tree-shakeable functions (client passed as the first argument):
+  // `import { getPet } from ".../services/pets"` pulls in only what you use.
+  for (const op of service.operations) {
+    parts.push(emitStandaloneOperation(op, ctx), "");
+  }
+
+  // Ergonomic grouped factory: methods delegate to the standalone functions and
+  // keep the `(params, options)` signature. Wired by `createSdk`.
   const factoryDoc = buildJsDoc({
     summary: service.docs.description ?? `Operations of the \`${service.name}\` service.`,
   });
@@ -28,7 +36,7 @@ export function emitService(service: IrService, ctx: EmitContext): string {
   parts.push(`export function create${service.pascalName}Service(ctx: ClientContext) {`);
   parts.push("  return {");
   for (const op of service.operations) {
-    parts.push(emitOperation(op, ctx), "");
+    parts.push(emitDelegatingMethod(op, ctx), "");
   }
   if (parts[parts.length - 1] === "") parts.pop();
   parts.push("  };");
@@ -105,12 +113,9 @@ function paramsOptional(op: IrOperation): boolean {
   return !required;
 }
 
-function emitOperation(op: IrOperation, ctx: EmitContext): string {
-  const indent = "    ";
-  const plan = computeFlatPlan(op, ctx.collisionCase);
-  const lines: string[] = [];
-
-  const doc = buildJsDoc(
+/** JSDoc block for an operation, shared by the standalone function and the factory method. */
+function operationDoc(op: IrOperation, plan: FlatPlan, indent: string): string | undefined {
+  return buildJsDoc(
     {
       summary: op.docs.summary,
       description: op.docs.description,
@@ -123,6 +128,34 @@ function emitOperation(op: IrOperation, ctx: EmitContext): string {
     },
     indent
   );
+}
+
+/** The standalone, tree-shakeable function: `op(ctx, params?, options?)`. */
+function emitStandaloneOperation(op: IrOperation, ctx: EmitContext): string {
+  const plan = computeFlatPlan(op, ctx.collisionCase);
+  const lines: string[] = [];
+
+  const doc = operationDoc(op, plan, "");
+  if (doc) lines.push(doc);
+
+  const args: string[] = ["ctx: ClientContext"];
+  if (hasData(op)) args.push(paramsSignature(op, plan, ""));
+  args.push(`options?: ${optionsType(op, "")}`);
+
+  const returnType = op.response.type.kind === "void" ? "void" : printType(op.response.type, "");
+  lines.push(`export function ${op.methodName}(${args.join(", ")}): Promise<${returnType}> {`);
+  lines.push(...requestCall(op, plan, "  "));
+  lines.push("}");
+  return lines.join("\n");
+}
+
+/** The factory method: same `(params?, options?)` signature, delegating to the standalone function. */
+function emitDelegatingMethod(op: IrOperation, ctx: EmitContext): string {
+  const indent = "    ";
+  const plan = computeFlatPlan(op, ctx.collisionCase);
+  const lines: string[] = [];
+
+  const doc = operationDoc(op, plan, indent);
   if (doc) lines.push(doc);
 
   // Two args: data first (path/query/body), request options second. When the
@@ -134,7 +167,11 @@ function emitOperation(op: IrOperation, ctx: EmitContext): string {
   const returnType =
     op.response.type.kind === "void" ? "void" : printType(op.response.type, indent);
   lines.push(`${indent}${op.methodName}(${args.join(", ")}): Promise<${returnType}> {`);
-  lines.push(...requestCall(op, plan, `${indent}  `));
+
+  const callArgs = ["ctx"];
+  if (hasData(op)) callArgs.push("params");
+  callArgs.push("options");
+  lines.push(`${indent}  return ${op.methodName}(${callArgs.join(", ")});`);
   lines.push(`${indent}},`);
   return lines.join("\n");
 }

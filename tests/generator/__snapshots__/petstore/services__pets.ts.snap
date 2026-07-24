@@ -3,6 +3,182 @@
 import type { ClientContext } from "@narthia/openapi-sdk-generator/client";
 import type { NewPet, Pet } from "../types";
 
+/**
+ * List all pets
+ *
+ * Returns a paginated list of pets.
+ *
+ * Use the `limit` parameter to control page size.
+ *
+ * @param params.limit - Maximum number of pets to return
+ * @param params.tags - Only return pets with these tags
+ * @returns A list of pets
+ */
+export function listPets(ctx: ClientContext, params?: {
+  /**
+   * Maximum number of pets to return
+   *
+   * @default 20
+   * @format int32
+   */
+  limit?: number;
+  /** Only return pets with these tags */
+  tags?: string[];
+  sort?: "name" | "age";
+}, options?: {
+  headers?: Record<string, string | number | boolean>;
+  signal?: AbortSignal;
+  extensions?: Record<string, unknown>;
+}): Promise<Pet[]> {
+  const { limit, tags, sort } = params ?? {};
+  return ctx.request({
+    method: "get",
+    path: "/pets",
+    query: { limit, tags, sort },
+    headers: options?.headers,
+    signal: options?.signal,
+    extensions: options?.extensions,
+  });
+}
+
+/**
+ * Create a pet
+ *
+ * @returns The created pet
+ */
+export function createPet(ctx: ClientContext, params: NewPet, options?: {
+  headers?: Record<string, string | number | boolean>;
+  signal?: AbortSignal;
+  extensions?: Record<string, unknown>;
+}): Promise<Pet> {
+  return ctx.request({
+    method: "post",
+    path: "/pets",
+    headers: options?.headers,
+    body: params,
+    signal: options?.signal,
+    extensions: options?.extensions,
+  });
+}
+
+/**
+ * Get a pet by ID
+ *
+ * @param params.petId - ID of the pet to fetch
+ * @param options.headers.X-Request-ID - Correlation ID
+ * @returns The requested pet
+ * @see https://example.com/docs/pets Pet guide
+ */
+export function getPetById(ctx: ClientContext, params: {
+  /**
+   * ID of the pet to fetch
+   *
+   * @format int64
+   */
+  petId: number;
+}, options?: {
+  headers?: {
+    /** Correlation ID */
+    "X-Request-ID"?: string;
+  } & Record<string, string | number | boolean>;
+  signal?: AbortSignal;
+  extensions?: Record<string, unknown>;
+}): Promise<Pet> {
+  const { petId } = params;
+  return ctx.request({
+    method: "get",
+    path: "/pets/{petId}",
+    pathParams: { petId },
+    headers: options?.headers,
+    signal: options?.signal,
+    extensions: options?.extensions,
+  });
+}
+
+/**
+ * Delete a pet
+ *
+ * @returns Deleted
+ * @deprecated
+ */
+export function deletePet(ctx: ClientContext, params: {
+  /** @format int64 */
+  petId: number;
+}, options?: {
+  headers?: Record<string, string | number | boolean>;
+  signal?: AbortSignal;
+  extensions?: Record<string, unknown>;
+}): Promise<void> {
+  const { petId } = params;
+  return ctx.request({
+    method: "delete",
+    path: "/pets/{petId}",
+    pathParams: { petId },
+    headers: options?.headers,
+    responseType: "void",
+    signal: options?.signal,
+    extensions: options?.extensions,
+  });
+}
+
+/**
+ * Download the photo of a pet
+ *
+ * @returns The photo
+ */
+export function downloadPetPhoto(ctx: ClientContext, params: {
+  /** @format int64 */
+  petId: number;
+}, options?: {
+  headers?: Record<string, string | number | boolean>;
+  signal?: AbortSignal;
+  extensions?: Record<string, unknown>;
+}): Promise<Blob> {
+  const { petId } = params;
+  return ctx.request({
+    method: "get",
+    path: "/pets/{petId}/photo",
+    pathParams: { petId },
+    headers: options?.headers,
+    responseType: "binary",
+    signal: options?.signal,
+    extensions: options?.extensions,
+  });
+}
+
+/**
+ * Upload a photo for a pet
+ *
+ * @returns Photo metadata
+ */
+export function uploadPetPhoto(ctx: ClientContext, params: {
+  /** The image file */
+  file: Blob;
+  caption?: string;
+} & {
+  /** @format int64 */
+  petId: number;
+}, options?: {
+  headers?: Record<string, string | number | boolean>;
+  signal?: AbortSignal;
+  extensions?: Record<string, unknown>;
+}): Promise<{
+  /** @format uri */
+  url?: string;
+}> {
+  const { petId, ...body } = params;
+  return ctx.request({
+    method: "post",
+    path: "/pets/{petId}/photo",
+    pathParams: { petId },
+    headers: options?.headers,
+    body: body,
+    bodyType: "form-data",
+    signal: options?.signal,
+    extensions: options?.extensions,
+  });
+}
+
 /** Everything about pets */
 export function createPetsService(ctx: ClientContext) {
   return {
@@ -33,15 +209,7 @@ export function createPetsService(ctx: ClientContext) {
       signal?: AbortSignal;
       extensions?: Record<string, unknown>;
     }): Promise<Pet[]> {
-      const { limit, tags, sort } = params ?? {};
-      return ctx.request({
-        method: "get",
-        path: "/pets",
-        query: { limit, tags, sort },
-        headers: options?.headers,
-        signal: options?.signal,
-        extensions: options?.extensions,
-      });
+      return listPets(ctx, params, options);
     },
 
     /**
@@ -54,14 +222,7 @@ export function createPetsService(ctx: ClientContext) {
       signal?: AbortSignal;
       extensions?: Record<string, unknown>;
     }): Promise<Pet> {
-      return ctx.request({
-        method: "post",
-        path: "/pets",
-        headers: options?.headers,
-        body: params,
-        signal: options?.signal,
-        extensions: options?.extensions,
-      });
+      return createPet(ctx, params, options);
     },
 
     /**
@@ -87,15 +248,7 @@ export function createPetsService(ctx: ClientContext) {
       signal?: AbortSignal;
       extensions?: Record<string, unknown>;
     }): Promise<Pet> {
-      const { petId } = params;
-      return ctx.request({
-        method: "get",
-        path: "/pets/{petId}",
-        pathParams: { petId },
-        headers: options?.headers,
-        signal: options?.signal,
-        extensions: options?.extensions,
-      });
+      return getPetById(ctx, params, options);
     },
 
     /**
@@ -112,16 +265,7 @@ export function createPetsService(ctx: ClientContext) {
       signal?: AbortSignal;
       extensions?: Record<string, unknown>;
     }): Promise<void> {
-      const { petId } = params;
-      return ctx.request({
-        method: "delete",
-        path: "/pets/{petId}",
-        pathParams: { petId },
-        headers: options?.headers,
-        responseType: "void",
-        signal: options?.signal,
-        extensions: options?.extensions,
-      });
+      return deletePet(ctx, params, options);
     },
 
     /**
@@ -137,16 +281,7 @@ export function createPetsService(ctx: ClientContext) {
       signal?: AbortSignal;
       extensions?: Record<string, unknown>;
     }): Promise<Blob> {
-      const { petId } = params;
-      return ctx.request({
-        method: "get",
-        path: "/pets/{petId}/photo",
-        pathParams: { petId },
-        headers: options?.headers,
-        responseType: "binary",
-        signal: options?.signal,
-        extensions: options?.extensions,
-      });
+      return downloadPetPhoto(ctx, params, options);
     },
 
     /**
@@ -169,17 +304,7 @@ export function createPetsService(ctx: ClientContext) {
       /** @format uri */
       url?: string;
     }> {
-      const { petId, ...body } = params;
-      return ctx.request({
-        method: "post",
-        path: "/pets/{petId}/photo",
-        pathParams: { petId },
-        headers: options?.headers,
-        body: body,
-        bodyType: "form-data",
-        signal: options?.signal,
-        extensions: options?.extensions,
-      });
+      return uploadPetPhoto(ctx, params, options);
     },
   };
 }
