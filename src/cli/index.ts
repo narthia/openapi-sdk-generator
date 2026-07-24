@@ -52,7 +52,7 @@ Examples:
  */
 export async function runCli(
   argv: string[] = process.argv.slice(2),
-  io: CliIo = defaultIo,
+  io: CliIo = defaultIo
 ): Promise<number> {
   let values;
   try {
@@ -107,7 +107,7 @@ export async function runCli(
   const collisionCase = values["collision-case"];
   if (collisionCase !== undefined && !["snake_case", "camelCase"].includes(collisionCase)) {
     io.err(
-      `Error: --collision-case must be one of "snake_case" or "camelCase" (got "${collisionCase}").`,
+      `Error: --collision-case must be one of "snake_case" or "camelCase" (got "${collisionCase}").`
     );
     return 1;
   }
@@ -210,7 +210,7 @@ if (isMainModule()) {
     (error: unknown) => {
       console.error(`Error: ${(error as Error).message}`);
       process.exitCode = 1;
-    },
+    }
   );
 }
 
