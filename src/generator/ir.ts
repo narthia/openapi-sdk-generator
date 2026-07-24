@@ -110,11 +110,23 @@ export interface IrSchema {
   docs: IrDocs;
 }
 
+/**
+ * An auth scheme derived from `components.securitySchemes`, used as the
+ * generate-time fallback when no explicit `auth` option is given. `key` is the
+ * securityScheme map key (used as the config discriminant / property name).
+ */
+export type IrAuthScheme =
+  | { type: "bearer"; key: string }
+  | { type: "apiKey"; key: string; in: "header" | "query"; name: string }
+  | { type: "basic"; key: string };
+
 export interface IrDocument {
   info: { title: string; version: string; description?: string };
   /** All named types (component schemas + hoisted anonymous schemas). */
   schemas: IrSchema[];
   services: IrService[];
+  /** Auth schemes derived from `components.securitySchemes` (fallback for the auth option). */
+  authSchemes: IrAuthScheme[];
   /** Non-fatal generation warnings, surfaced by the CLI. */
   warnings: string[];
 }
@@ -187,6 +199,7 @@ class IrBuilder {
       },
       schemas: this.schemas,
       services,
+      authSchemes: this.parseSecuritySchemes(),
       warnings: this.warnings,
     };
   }
@@ -194,6 +207,42 @@ class IrBuilder {
   private componentSchemas(): RawObject {
     const components = (this.spec["components"] ?? {}) as RawObject;
     return (components["schemas"] ?? {}) as RawObject;
+  }
+
+  /** Map `components.securitySchemes` to auth schemes usable by the emitter. */
+  private parseSecuritySchemes(): IrAuthScheme[] {
+    const components = (this.spec["components"] ?? {}) as RawObject;
+    const schemes = (components["securitySchemes"] ?? {}) as RawObject;
+    const result: IrAuthScheme[] = [];
+    for (const [key, raw] of Object.entries(schemes)) {
+      if (raw === null || typeof raw !== "object") continue;
+      const scheme = raw as RawObject;
+      const type = scheme["type"];
+      if (type === "http") {
+        const rawScheme = scheme["scheme"];
+        const httpScheme = typeof rawScheme === "string" ? rawScheme.toLowerCase() : "";
+        if (httpScheme === "basic") result.push({ type: "basic", key });
+        else if (httpScheme === "bearer") result.push({ type: "bearer", key });
+        else {
+          this.warnings.push(
+            `Security scheme "${key}": unsupported http scheme "${httpScheme}"; treating as bearer.`
+          );
+          result.push({ type: "bearer", key });
+        }
+      } else if (type === "apiKey") {
+        const location = scheme["in"] === "query" ? "query" : "header";
+        const name = typeof scheme["name"] === "string" ? scheme["name"] : key;
+        result.push({ type: "apiKey", key, in: location, name });
+      } else if (type === "oauth2" || type === "openIdConnect") {
+        this.warnings.push(`Security scheme "${key}": "${type}" is treated as a bearer token.`);
+        result.push({ type: "bearer", key });
+      } else {
+        this.warnings.push(
+          `Security scheme "${key}": unsupported type "${String(type)}"; skipped.`
+        );
+      }
+    }
+    return result;
   }
 
   // --- services / operations ---

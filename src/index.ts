@@ -8,6 +8,11 @@
  *   (AWS Lambda, Atlassian Forge, ...) plug into the same `Transport` interface.
  */
 export { generateSdk } from "./generator/generate.ts";
-export type { GeneratedFile, GenerateOptions, GenerateResult } from "./generator/generate.ts";
+export type {
+  AuthOption,
+  GeneratedFile,
+  GenerateOptions,
+  GenerateResult,
+} from "./generator/generate.ts";
 export type { CollisionCase } from "./generator/emit/ts-writer.ts";
 export type { SpecInput } from "./generator/load.ts";

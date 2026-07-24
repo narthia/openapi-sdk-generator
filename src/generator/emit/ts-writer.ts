@@ -8,6 +8,20 @@ const INDENT = "  ";
 /** Case style for the suffix applied to a collided path/query param name. */
 export type CollisionCase = "snake_case" | "camelCase";
 
+/**
+ * A fully resolved auth scheme (all field-name defaults applied) that the index
+ * emitter turns into a bespoke config type and a runtime-auth adapter.
+ */
+export type ResolvedAuthScheme =
+  | { type: "bearer"; key: string; field: string }
+  | { type: "apiKey"; key: string; in: "header" | "query"; name: string; field: string }
+  | { type: "basic"; key: string; usernameField: string; passwordField: string };
+
+/** The auth schemes a generated SDK supports (the client uses exactly one). */
+export interface ResolvedAuth {
+  schemes: ResolvedAuthScheme[];
+}
+
 /** Options shared by every emitted file. */
 export interface EmitContext {
   /** Import specifier of the runtime package, e.g. `@narthia/openapi-sdk-generator`. */
@@ -18,6 +32,8 @@ export interface EmitContext {
   sdkName: string;
   /** Case used to render a collided path/query param name (`snake_case` → `status_query`, `camelCase` → `statusQuery`). */
   collisionCase: CollisionCase;
+  /** Resolved auth model, or `undefined` to emit the generic runtime `ClientConfig`. */
+  auth?: ResolvedAuth;
 }
 
 /** Render a relative import specifier honoring the configured extension. */

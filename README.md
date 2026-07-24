@@ -21,15 +21,22 @@ npm install @narthia/openapi-sdk-generator
 npx openapi-sdk-generator --input ./openapi.json --output ./src/sdk
 ```
 
-| Flag                           | Description                                                                                       |
-| ------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `-i, --input <path\|url>`      | OpenAPI 3.0/3.1 spec - a JSON file path or an `http(s)` URL (**required**)                        |
-| `-o, --output <dir>`           | Directory to write the generated SDK into (**required**)                                          |
-| `-n, --name <name>`            | Name of the generated factory (default: `createSdk`)                                              |
-| `--runtime <pkg>`              | Runtime import specifier (default: `@narthia/openapi-sdk-generator`)                              |
-| `--import-ext <ext>`           | Relative-import extension in emitted code: `""`, `js`, or `ts` (default: `""`)                    |
-| `--collision-case <case>`      | Case for renamed colliding path/query params: `snake_case` or `camelCase` (default: `snake_case`) |
-| `-h, --help` / `-v, --version` | Show help / print version                                                                         |
+| Flag                            | Description                                                                                       |
+| ------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `-i, --input <path\|url>`       | OpenAPI 3.0/3.1 spec - a JSON file path or an `http(s)` URL (**required**)                        |
+| `-o, --output <dir>`            | Directory to write the generated SDK into (**required**)                                          |
+| `-n, --name <name>`             | Name of the generated factory (default: `createSdk`)                                              |
+| `--runtime <pkg>`               | Runtime import specifier (default: `@narthia/openapi-sdk-generator`)                              |
+| `--import-ext <ext>`            | Relative-import extension in emitted code: `""`, `js`, or `ts` (default: `""`)                    |
+| `--collision-case <case>`       | Case for renamed colliding path/query params: `snake_case` or `camelCase` (default: `snake_case`) |
+| `--auth-type <list>`            | Comma-separated auth schemes to generate: `bearer`, `basic`, `apiKey` (see [Auth](#auth))         |
+| `--basic-username-field <name>` | Rename basic auth's `username` config field (e.g. `email`)                                        |
+| `--basic-password-field <name>` | Rename basic auth's `password` config field (e.g. `apitoken`)                                     |
+| `--bearer-field <name>`         | Rename the bearer `token` config field                                                            |
+| `--apikey-field <name>`         | Rename the apiKey `value` config field                                                            |
+| `--apikey-in <where>`           | apiKey location: `header` or `query` (default: `header`)                                          |
+| `--apikey-name <name>`          | apiKey header/query parameter name (required when generating an `apiKey` scheme)                  |
+| `-h, --help` / `-v, --version`  | Show help / print version                                                                         |
 
 ### Programmatic
 
@@ -121,7 +128,7 @@ await client.pets.getPetById(
   { petId: 42 },
   {
     extensions: { fetchOptions: { next: { revalidate: 60 } } },
-  }
+  },
 );
 ```
 
@@ -163,6 +170,54 @@ sdk/
     <service>.ts        # types used by a single service
     index.ts            # barrel - import type { X } from "../types"
 ```
+
+## Auth
+
+By default `createSdk` accepts the runtime's generic `auth` config (a single `bearer`, `apiKey`, or `basic` scheme), as shown above. You can instead **bake the auth surface into the generated SDK** so the config fields are named for your API and only the schemes you support are allowed. A generated client uses **one** auth scheme (see [Multiple schemes](#multiple-schemes) for how the caller picks).
+
+Configure it with the `auth` option (`generateSdk`) or the `--auth-*` flags. `auth` is a map keyed by scheme; each entry's field names are yours to choose - for example, rename basic auth's `username`/`password` to `email`/`apitoken`:
+
+```ts
+await generateSdk({
+  input: "./openapi.json",
+  output: "./src/sdk",
+  auth: { basic: { usernameField: "email", passwordField: "apitoken" } },
+});
+```
+
+```bash
+openapi-sdk-generator -i ./openapi.json -o ./src/sdk \
+  --auth-type basic --basic-username-field email --basic-password-field apitoken
+```
+
+A **single** scheme produces a flat config (no discriminant):
+
+```ts
+const client = createSdk({ auth: { email: "me@example.com", apitoken: "secret" } });
+```
+
+Default field names per type: bearer -> `token`, apiKey -> `value`, basic -> `username` / `password`. Rename any of them with `field` (bearer/apiKey), `usernameField` / `passwordField` (basic), or the matching CLI flags. `apiKey` also needs `in` (`header` or `query`) and the wire `name`.
+
+### Multiple schemes
+
+List more than one entry in the map when an API supports several auth methods. The generated config becomes a **discriminated union** - the caller picks exactly one at init, and only it is applied:
+
+```ts
+auth: {
+  basic: {},
+  bearer: { field: "accessToken" },
+};
+// -> createSdk({ auth: { type: "bearer", accessToken: "..." } })
+//    or createSdk({ auth: { type: "basic", username: "...", password: "..." } })
+```
+
+Each scheme is keyed by its `type` (`basic`, `bearer`, `apiKey`), so the map holds at most one of each. Schemes derived from the spec key off their `type` too, falling back to the `securitySchemes` name only when a type appears more than once.
+
+**Two credentials at once?** A generated client applies a single scheme, so APIs that require _two_ credentials per request (e.g. an Azure API Management subscription key plus a bearer token) aren't modelled by `auth`. Supply the second credential with a default `headers` entry on `createSdk`, or inject/sign it in `onRequest`.
+
+### Derived from the spec
+
+When you pass no `auth` option, schemes are derived automatically from the spec's `components.securitySchemes` (`http`/`bearer`, `http`/`basic`, and `apiKey`; `oauth2` / `openIdConnect` are treated as a bearer token), with default field names. Passing an explicit `auth` option overrides this entirely. If neither is present, the generated config falls back to the runtime's generic `auth`.
 
 ## Runtime architecture
 

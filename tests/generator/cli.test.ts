@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CliIo } from "../../src/cli/index.ts";
-import { runCli } from "../../src/cli/index.ts";
+import { buildAuthOption, runCli } from "../../src/cli/index.ts";
 
 const fixture = fileURLToPath(new URL("../fixtures/petstore-3.0.json", import.meta.url));
 
@@ -80,5 +80,59 @@ describe("runCli", () => {
     const outDir = await makeOut();
     expect(await runCli(["-i", "/no/such/spec.json", "-o", outDir], io)).toBe(1);
     expect(err.join("\n")).toContain("Failed to read OpenAPI spec file");
+  });
+
+  it("generates renamed basic auth via flags", async () => {
+    const { io } = captureIo();
+    const outDir = await makeOut();
+    expect(
+      await runCli(
+        [
+          "-i",
+          fixture,
+          "-o",
+          outDir,
+          "--auth-type",
+          "basic",
+          "--basic-username-field",
+          "email",
+          "--basic-password-field",
+          "apitoken",
+        ],
+        io
+      )
+    ).toBe(0);
+    const index = await readFile(join(outDir, "index.ts"), "utf8");
+    expect(index).toContain("email: string;");
+    expect(index).toContain("apitoken: string;");
+  });
+});
+
+describe("buildAuthOption", () => {
+  it("returns undefined auth when --auth-type is absent", () => {
+    expect(buildAuthOption({})).toEqual({ auth: undefined });
+  });
+
+  it("builds a multi-scheme map option (case-insensitive types)", () => {
+    const result = buildAuthOption({
+      "auth-type": "bearer, apiKey",
+      "apikey-name": "X-API-Key",
+      "apikey-in": "header",
+      "bearer-field": "accessToken",
+    });
+    expect(result.auth).toEqual({
+      bearer: { field: "accessToken" },
+      apiKey: { in: "header", name: "X-API-Key", field: undefined },
+    });
+  });
+
+  it("errors when apiKey has no name", () => {
+    expect(buildAuthOption({ "auth-type": "apiKey" }).error).toContain("--apikey-name is required");
+  });
+
+  it("errors on an unknown auth type", () => {
+    expect(buildAuthOption({ "auth-type": "oauth" }).error).toContain(
+      'must be "bearer", "basic", or "apiKey"'
+    );
   });
 });
