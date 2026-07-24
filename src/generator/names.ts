@@ -80,6 +80,12 @@ export function kebabCase(input: string): string {
     .join("-");
 }
 
+export function snakeCase(input: string): string {
+  return splitWords(input)
+    .map((w) => w.toLowerCase())
+    .join("_");
+}
+
 /** All-caps words are treated as acronyms so `APIKey` → `apiKey`, `X-Request-ID` → `xRequestId`. */
 function isAcronym(word: string): boolean {
   return word.length > 1 && word === word.toUpperCase();

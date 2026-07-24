@@ -5,6 +5,9 @@ import { propertyKey } from "../names.ts";
 
 const INDENT = "  ";
 
+/** Case style for the suffix applied to a collided path/query param name. */
+export type CollisionCase = "snake_case" | "camelCase";
+
 /** Options shared by every emitted file. */
 export interface EmitContext {
   /** Import specifier of the runtime package, e.g. `@narthia/openapi-sdk-generator`. */
@@ -13,6 +16,8 @@ export interface EmitContext {
   importExtension: "" | "js" | "ts";
   /** Name of the generated SDK factory, e.g. `createSdk`. */
   sdkName: string;
+  /** Case used to render a collided path/query param name (`snake_case` → `status_query`, `camelCase` → `statusQuery`). */
+  collisionCase: CollisionCase;
 }
 
 /** Render a relative import specifier honoring the configured extension. */

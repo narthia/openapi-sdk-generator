@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { EmitContext } from "./emit/ts-writer.ts";
+import type { CollisionCase, EmitContext } from "./emit/ts-writer.ts";
 import type { SpecInput } from "./load.ts";
 import { detectVersion } from "./detect.ts";
 import { emitIndex } from "./emit/emit-index.ts";
@@ -31,6 +31,13 @@ export interface GenerateOptions {
    * @default ""
    */
   importExtension?: "" | "js" | "ts";
+  /**
+   * Case used to render a path/query param name that collides with another
+   * param or a request-body property: `"snake_case"` → `status_query`,
+   * `"camelCase"` → `statusQuery`. Request-body properties are never renamed.
+   * @default "snake_case"
+   */
+  collisionCase?: CollisionCase;
 }
 
 export interface GeneratedFile {
@@ -68,6 +75,7 @@ export async function generateSdk(options: GenerateOptions): Promise<GenerateRes
     runtimePackage: options.runtimePackage ?? "@narthia/openapi-sdk-generator",
     importExtension: options.importExtension ?? "",
     sdkName: options.name ?? "createSdk",
+    collisionCase: options.collisionCase ?? "snake_case",
   };
 
   const partition = partitionSchemas(ir);

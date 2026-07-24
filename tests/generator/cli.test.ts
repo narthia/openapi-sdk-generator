@@ -51,6 +51,13 @@ describe("runCli", () => {
     expect(err.join("\n")).toContain("--import-ext must be one of");
   });
 
+  it("rejects invalid --collision-case", async () => {
+    const { io, err } = captureIo();
+    const out = await makeOut();
+    expect(await runCli(["-i", fixture, "-o", out, "--collision-case", "kebab-case"], io)).toBe(1);
+    expect(err.join("\n")).toContain("--collision-case must be one of");
+  });
+
   it("rejects unknown flags", async () => {
     const { io, err } = captureIo();
     expect(await runCli(["--nope"], io)).toBe(1);

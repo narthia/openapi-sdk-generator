@@ -114,6 +114,19 @@ describe("flat method arguments", () => {
     expect(service).toContain("query: { status: status_query }");
     expect(service).toContain("body: body,");
   });
+
+  it("renders collision suffixes in camelCase when collisionCase is 'camelCase'", async () => {
+    const { files } = await generateSdk({ input: collisionSpec, collisionCase: "camelCase" });
+    const service = files.find((f) => f.path === "services/items.ts")!.contents;
+
+    expect(service).toContain("statusPath: string;");
+    expect(service).toContain("statusQuery?: string;");
+    expect(service).toContain("const { statusPath, statusQuery, ...body } = params;");
+    expect(service).toContain("pathParams: { status: statusPath }");
+    expect(service).toContain("query: { status: statusQuery }");
+    // Body property `status` is untouched regardless of collisionCase.
+    expect(service).not.toContain("status_path");
+  });
 });
 
 describe("type partitioning", () => {

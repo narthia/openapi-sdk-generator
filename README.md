@@ -21,14 +21,15 @@ npm install @narthia/openapi-sdk-generator
 npx openapi-sdk-generator --input ./openapi.json --output ./src/sdk
 ```
 
-| Flag                           | Description                                                                    |
-| ------------------------------ | ------------------------------------------------------------------------------ |
-| `-i, --input <path\|url>`      | OpenAPI 3.0/3.1 spec - a JSON file path or an `http(s)` URL (**required**)     |
-| `-o, --output <dir>`           | Directory to write the generated SDK into (**required**)                       |
-| `-n, --name <name>`            | Name of the generated factory (default: `createSdk`)                           |
-| `--runtime <pkg>`              | Runtime import specifier (default: `@narthia/openapi-sdk-generator`)           |
-| `--import-ext <ext>`           | Relative-import extension in emitted code: `""`, `js`, or `ts` (default: `""`) |
-| `-h, --help` / `-v, --version` | Show help / print version                                                      |
+| Flag                           | Description                                                                                       |
+| ------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `-i, --input <path\|url>`      | OpenAPI 3.0/3.1 spec - a JSON file path or an `http(s)` URL (**required**)                        |
+| `-o, --output <dir>`           | Directory to write the generated SDK into (**required**)                                          |
+| `-n, --name <name>`            | Name of the generated factory (default: `createSdk`)                                              |
+| `--runtime <pkg>`              | Runtime import specifier (default: `@narthia/openapi-sdk-generator`)                              |
+| `--import-ext <ext>`           | Relative-import extension in emitted code: `""`, `js`, or `ts` (default: `""`)                    |
+| `--collision-case <case>`      | Case for renamed colliding path/query params: `snake_case` or `camelCase` (default: `snake_case`) |
+| `-h, --help` / `-v, --version` | Show help / print version                                                                         |
 
 ### Programmatic
 
@@ -77,7 +78,7 @@ client.pets.getPetById({ petId: 42 }, { headers: { "X-Request-ID": "abc" }, sign
 
 Operations with no path/query/body take only the `options` argument (e.g. `client.health.getHealth({ signal })`).
 
-**Name collisions** - if a path or query param shares a name with a body property (or with each other), the _param_ is suffixed with its location (`status_query`, `id_path`); body properties always keep their exact names. For example, a `status` path param alongside a `status` body field becomes `{ status_path, status }` in the data object.
+**Name collisions** - if a path or query param shares a name with a body property (or with each other), the _param_ is suffixed with its location (`status_query`, `id_path`); body properties always keep their exact names. For example, a `status` path param alongside a `status` body field becomes `{ status_path, status }` in the data object. The suffix case is configurable via the `collisionCase` option (`generateSdk`) / `--collision-case` flag: `"snake_case"` (default, `status_query`) or `"camelCase"` (`statusQuery`).
 
 Non-object bodies (binary uploads, arrays) can't be spread, so they stay under a single `body` key in the data object. Non-2xx responses throw an `ApiError` carrying the status, headers, and parsed body:
 

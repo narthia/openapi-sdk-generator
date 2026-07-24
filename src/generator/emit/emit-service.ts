@@ -1,9 +1,9 @@
 import type { IrOperation, IrParam, IrService } from "../ir.ts";
-import type { EmitContext } from "./ts-writer.ts";
+import type { CollisionCase, EmitContext } from "./ts-writer.ts";
 import { collectRefs } from "../ir.ts";
 /** Emits one `services/<name>.ts` file per service: a factory returning JSDoc'd methods. */
 import { buildJsDoc } from "../jsdoc.ts";
-import { propertyKey } from "../names.ts";
+import { camelCase, propertyKey, snakeCase } from "../names.ts";
 import { GENERATED_HEADER, operationTypes } from "./emit-types.ts";
 import { printProperty, printType, relativeImport } from "./ts-writer.ts";
 
@@ -28,7 +28,7 @@ export function emitService(service: IrService, ctx: EmitContext): string {
   parts.push(`export function create${service.pascalName}Service(ctx: ClientContext) {`);
   parts.push("  return {");
   for (const op of service.operations) {
-    parts.push(emitOperation(op), "");
+    parts.push(emitOperation(op, ctx), "");
   }
   if (parts[parts.length - 1] === "") parts.pop();
   parts.push("  };");
@@ -57,18 +57,25 @@ interface FlatPlan {
  * Merge path params, query params, and (spread) body properties into the first
  * `params` argument. Body properties keep their names; a path/query param that
  * collides with a body property (or with each other) is suffixed with its
- * location (`id_path`, `status_query`). Headers, `signal`, and `extensions`
- * live in the separate `options` argument, so they never collide with data.
+ * location, rendered in the configured {@link CollisionCase} (`id_path` /
+ * `status_query` for `snake_case`, `idPath` / `statusQuery` for `camelCase`).
+ * Headers, `signal`, and `extensions` live in the separate `options` argument,
+ * so they never collide with data.
  */
-function computeFlatPlan(op: IrOperation): FlatPlan {
+function computeFlatPlan(op: IrOperation, collisionCase: CollisionCase): FlatPlan {
   const used = new Set<string>();
 
   const bodySpread = op.body?.spreadProps !== undefined;
   if (op.body?.spreadProps) for (const name of op.body.spreadProps) used.add(name);
   if (op.body && !bodySpread) used.add("body");
 
-  const assign = (tsName: string, suffix: string): string => {
-    let name = used.has(tsName) ? `${tsName}_${suffix}` : tsName;
+  const suffixed = (tsName: string, location: "path" | "query"): string => {
+    const combined = `${tsName} ${location}`;
+    return collisionCase === "camelCase" ? camelCase(combined) : snakeCase(combined);
+  };
+
+  const assign = (tsName: string, location: "path" | "query"): string => {
+    let name = used.has(tsName) ? suffixed(tsName, location) : tsName;
     while (used.has(name)) name = `${name}_`;
     used.add(name);
     return name;
@@ -98,9 +105,9 @@ function paramsOptional(op: IrOperation): boolean {
   return !required;
 }
 
-function emitOperation(op: IrOperation): string {
+function emitOperation(op: IrOperation, ctx: EmitContext): string {
   const indent = "    ";
-  const plan = computeFlatPlan(op);
+  const plan = computeFlatPlan(op, ctx.collisionCase);
   const lines: string[] = [];
 
   const doc = buildJsDoc(

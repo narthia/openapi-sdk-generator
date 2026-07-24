@@ -26,6 +26,7 @@ Options:
   -n, --name <name>        Name of the generated SDK factory (default: createSdk)
       --runtime <pkg>      Runtime import specifier (default: @narthia/openapi-sdk-generator)
       --import-ext <ext>   Relative-import extension: "" | js | ts (default: "")
+      --collision-case <c> Case for renamed colliding path/query params: snake_case | camelCase (default: snake_case)
   -h, --help               Show this help
   -v, --version            Print the version
 
@@ -52,6 +53,7 @@ export async function runCli(
         name: { type: "string", short: "n" },
         runtime: { type: "string" },
         "import-ext": { type: "string" },
+        "collision-case": { type: "string" },
         help: { type: "boolean", short: "h" },
         version: { type: "boolean", short: "v" },
       },
@@ -83,6 +85,14 @@ export async function runCli(
     return 1;
   }
 
+  const collisionCase = values["collision-case"];
+  if (collisionCase !== undefined && !["snake_case", "camelCase"].includes(collisionCase)) {
+    io.err(
+      `Error: --collision-case must be one of "snake_case" or "camelCase" (got "${collisionCase}").`
+    );
+    return 1;
+  }
+
   try {
     const result = await generateSdk({
       input: values.input,
@@ -90,6 +100,7 @@ export async function runCli(
       name: values.name,
       runtimePackage: values.runtime,
       importExtension: importExtension as "" | "js" | "ts" | undefined,
+      collisionCase: collisionCase as "snake_case" | "camelCase" | undefined,
     });
 
     for (const warning of result.warnings) io.err(`Warning: ${warning}`);
