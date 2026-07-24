@@ -14,5 +14,7 @@ export type {
   GenerateOptions,
   GenerateResult,
 } from "./generator/generate.ts";
+export { defineConfig } from "./config.ts";
+export type { Config } from "./config.ts";
 export type { CollisionCase } from "./generator/emit/ts-writer.ts";
 export type { SpecInput } from "./generator/load.ts";

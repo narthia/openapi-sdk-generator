@@ -41,7 +41,7 @@ describe("runCli", () => {
   it("requires input and output", async () => {
     const { io, err } = captureIo();
     expect(await runCli([], io)).toBe(1);
-    expect(err.join("\n")).toContain("both --input and --output are required");
+    expect(err.join("\n")).toContain("both input and output are required");
   });
 
   it("rejects invalid --import-ext", async () => {

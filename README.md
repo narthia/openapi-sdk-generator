@@ -21,22 +21,50 @@ npm install @narthia/openapi-sdk-generator
 npx openapi-sdk-generator --input ./openapi.json --output ./src/sdk
 ```
 
-| Flag                            | Description                                                                                       |
-| ------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `-i, --input <path\|url>`       | OpenAPI 3.0/3.1 spec - a JSON file path or an `http(s)` URL (**required**)                        |
-| `-o, --output <dir>`            | Directory to write the generated SDK into (**required**)                                          |
-| `-n, --name <name>`             | Name of the generated factory (default: `createSdk`)                                              |
-| `--runtime <pkg>`               | Runtime import specifier (default: `@narthia/openapi-sdk-generator`)                              |
-| `--import-ext <ext>`            | Relative-import extension in emitted code: `""`, `js`, or `ts` (default: `""`)                    |
-| `--collision-case <case>`       | Case for renamed colliding path/query params: `snake_case` or `camelCase` (default: `snake_case`) |
-| `--auth-type <list>`            | Comma-separated auth schemes to generate: `bearer`, `basic`, `apiKey` (see [Auth](#auth))         |
-| `--basic-username-field <name>` | Rename basic auth's `username` config field (e.g. `email`)                                        |
-| `--basic-password-field <name>` | Rename basic auth's `password` config field (e.g. `apitoken`)                                     |
-| `--bearer-field <name>`         | Rename the bearer `token` config field                                                            |
-| `--apikey-field <name>`         | Rename the apiKey `value` config field                                                            |
-| `--apikey-in <where>`           | apiKey location: `header` or `query` (default: `header`)                                          |
-| `--apikey-name <name>`          | apiKey header/query parameter name (required when generating an `apiKey` scheme)                  |
-| `-h, --help` / `-v, --version`  | Show help / print version                                                                         |
+| Flag                            | Description                                                                                                 |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `-i, --input <path\|url>`       | OpenAPI 3.0/3.1 spec - a JSON file path or an `http(s)` URL (**required\***)                                |
+| `-o, --output <dir>`            | Directory to write the generated SDK into (**required\***)                                                  |
+| `-c, --config <path>`           | Config file (default: auto-discover `openapi-sdk.config.{ts,mjs,js,json}`, see [Config file](#config-file)) |
+| `-n, --name <name>`             | Name of the generated factory (default: `createSdk`)                                                        |
+| `--runtime <pkg>`               | Runtime import specifier (default: `@narthia/openapi-sdk-generator`)                                        |
+| `--import-ext <ext>`            | Relative-import extension in emitted code: `""`, `js`, or `ts` (default: `""`)                              |
+| `--collision-case <case>`       | Case for renamed colliding path/query params: `snake_case` or `camelCase` (default: `snake_case`)           |
+| `--auth-type <list>`            | Comma-separated auth schemes to generate: `bearer`, `basic`, `apiKey` (see [Auth](#auth))                   |
+| `--basic-username-field <name>` | Rename basic auth's `username` config field (e.g. `email`)                                                  |
+| `--basic-password-field <name>` | Rename basic auth's `password` config field (e.g. `apitoken`)                                               |
+| `--bearer-field <name>`         | Rename the bearer `token` config field                                                                      |
+| `--apikey-field <name>`         | Rename the apiKey `value` config field                                                                      |
+| `--apikey-in <where>`           | apiKey location: `header` or `query` (default: `header`)                                                    |
+| `--apikey-name <name>`          | apiKey header/query parameter name (required when generating an `apiKey` scheme)                            |
+| `-h, --help` / `-v, --version`  | Show help / print version                                                                                   |
+
+\* `input` and `output` may come from a [config file](#config-file) instead of flags; flags override the config.
+
+### Config file
+
+Keep all settings in a config file and run the CLI with no flags. `defineConfig` gives you full type-checking and autocomplete:
+
+```ts
+// openapi-sdk.config.ts
+import { defineConfig } from "@narthia/openapi-sdk-generator";
+
+export default defineConfig({
+  input: "https://api.example.com/openapi.json",
+  output: "./src/sdk",
+  collisionCase: "snake_case",
+  auth: { basic: { usernameField: "email", passwordField: "apiToken" } },
+});
+```
+
+```bash
+openapi-sdk-generator            # auto-discovers openapi-sdk.config.* in the cwd
+openapi-sdk-generator -c ./sdk.config.ts   # or point at one explicitly
+```
+
+- **Discovery**: with no `--config`, the CLI looks for `openapi-sdk.config.{ts,mts,mjs,js,cjs,json}` in the working directory (first match wins).
+- **Formats**: `.json`, `.mjs`, `.js`, `.cjs` work on any supported Node. A `.ts`/`.mts` config is loaded via Node's native type stripping, which needs **Node >= 22.6** - on older runtimes use `.mjs`/`.js`/`.json`. (No extra dependency is added for TS.)
+- **Precedence**: CLI flags override config-file values; anything omitted in both falls back to the generator's defaults. The config accepts every [`generateSdk`](#programmatic) option.
 
 ### Programmatic
 

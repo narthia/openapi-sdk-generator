@@ -6,7 +6,7 @@
       "name": "@narthia/openapi-sdk-generator",
       "devDependencies": {
         "@changesets/cli": "^2.31.1",
-        "@narthia/toolkit": "^0.0.3",
+        "@narthia/toolkit": "^0.0.4",
         "@types/node": "^26.1.1",
         "eslint-plugin-check-file": "^3.3.2",
         "oxfmt": "^0.60.0",
@@ -100,7 +100,7 @@
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.6", "", { "dependencies": { "@tybys/wasm-util": "^0.10.3" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" } }, "sha512-ZLv/JdUfkvOy9eCnnBaGfiO+XimbjebAeO+MRQqD/B+FR1tnRN0tpKSJHRbE8sFfS6aqsXZ67TQjfwfsxULVbg=="],
 
-    "@narthia/toolkit": ["@narthia/toolkit@0.0.3", "", {}, "sha512-jUfesIQiq30ympdjWJrRLTF78LJfGJoJv50s87RUivMsl9+JYc4iRiwXIuHC2NBpHUgMN6V8WwwsX/D220s+GA=="],
+    "@narthia/toolkit": ["@narthia/toolkit@0.0.4", "", {}, "sha512-/ItGP7Q2l0Zp8nS2zaTLeW4Sleoi8rh95kazBZ3NbbqVrB7C/zmoIi/opNrLKmEqevb9R3aaVvu55qwcFvDVIw=="],
 
     "@nodelib/fs.scandir": ["@nodelib/fs.scandir@2.1.5", "", { "dependencies": { "@nodelib/fs.stat": "2.0.5", "run-parallel": "^1.1.9" } }, "sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g=="],
 

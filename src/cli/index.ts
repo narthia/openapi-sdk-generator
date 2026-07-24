@@ -2,8 +2,9 @@
 /* eslint-disable no-console -- this is a CLI; console is its output channel */
 import { createRequire } from "node:module";
 import { parseArgs } from "node:util";
-import type { AuthOption } from "../generator/generate.ts";
+import type { AuthOption, GenerateOptions } from "../generator/generate.ts";
 import { generateSdk } from "../generator/generate.ts";
+import { loadConfig, resolveConfigPath } from "./load-config.ts";
 
 /** Minimal console surface so tests can capture output without touching globals. */
 export interface CliIo {
@@ -22,14 +23,17 @@ Usage:
   openapi-sdk-generator --input <path|url> --output <dir> [options]
 
 Options:
-  -i, --input <path|url>   OpenAPI 3.0/3.1 spec (JSON file path or http(s) URL)   [required]
-  -o, --output <dir>       Directory to write the generated SDK into              [required]
+  -i, --input <path|url>   OpenAPI 3.0/3.1 spec (JSON file path or http(s) URL)   [required*]
+  -o, --output <dir>       Directory to write the generated SDK into              [required*]
+  -c, --config <path>      Config file (default: auto-discover openapi-sdk.config.{ts,mjs,js,json})
   -n, --name <name>        Name of the generated SDK factory (default: createSdk)
       --runtime <pkg>      Runtime import specifier (default: @narthia/openapi-sdk-generator)
       --import-ext <ext>   Relative-import extension: "" | js | ts (default: "")
       --collision-case <c> Case for renamed colliding path/query params: snake_case | camelCase (default: snake_case)
   -h, --help               Show this help
   -v, --version            Print the version
+
+  * input and output may come from a config file instead of flags; flags override the config.
 
 Auth (when omitted, schemes are derived from the spec's securitySchemes):
       --auth-type <list>   Comma-separated auth schemes: bearer, basic, apiKey
@@ -41,6 +45,8 @@ Auth (when omitted, schemes are derived from the spec's securitySchemes):
       --apikey-name <name>           apiKey header/query parameter name (required for apiKey)
 
 Examples:
+  openapi-sdk-generator                       # uses ./openapi-sdk.config.ts (or .mjs/.js/.json)
+  openapi-sdk-generator -c ./sdk.config.ts
   openapi-sdk-generator -i ./openapi.json -o ./src/sdk
   openapi-sdk-generator -i https://api.example.com/openapi.json -o ./sdk --import-ext js
   openapi-sdk-generator -i ./openapi.json -o ./sdk --auth-type basic --basic-username-field email --basic-password-field apitoken
@@ -52,7 +58,8 @@ Examples:
  */
 export async function runCli(
   argv: string[] = process.argv.slice(2),
-  io: CliIo = defaultIo
+  io: CliIo = defaultIo,
+  cwd: string = process.cwd()
 ): Promise<number> {
   let values;
   try {
@@ -62,6 +69,7 @@ export async function runCli(
       options: {
         input: { type: "string", short: "i" },
         output: { type: "string", short: "o" },
+        config: { type: "string", short: "c" },
         name: { type: "string", short: "n" },
         runtime: { type: "string" },
         "import-ext": { type: "string" },
@@ -92,12 +100,6 @@ export async function runCli(
     return 0;
   }
 
-  if (!values.input || !values.output) {
-    io.err("Error: both --input and --output are required.");
-    io.err('Run "openapi-sdk-generator --help" for usage.');
-    return 1;
-  }
-
   const importExtension = values["import-ext"];
   if (importExtension !== undefined && !["", "js", "ts"].includes(importExtension)) {
     io.err(`Error: --import-ext must be one of "", "js", or "ts" (got "${importExtension}").`);
@@ -118,19 +120,39 @@ export async function runCli(
     return 1;
   }
 
+  let fileConfig: Partial<GenerateOptions> = {};
+  try {
+    const configPath = await resolveConfigPath(values.config, cwd);
+    if (configPath) fileConfig = await loadConfig(configPath);
+  } catch (error) {
+    io.err(`Error: ${(error as Error).message}`);
+    return 1;
+  }
+
+  // Flags override config; config fills the rest; generateSdk applies its own defaults.
+  const input = values.input ?? fileConfig.input;
+  const output = values.output ?? fileConfig.output;
+  if (input === undefined || output === undefined) {
+    io.err("Error: both input and output are required (via --input/--output or a config file).");
+    io.err('Run "openapi-sdk-generator --help" for usage.');
+    return 1;
+  }
+
   try {
     const result = await generateSdk({
-      input: values.input,
-      output: values.output,
-      name: values.name,
-      runtimePackage: values.runtime,
-      importExtension: importExtension as "" | "js" | "ts" | undefined,
-      collisionCase: collisionCase as "snake_case" | "camelCase" | undefined,
-      auth: authResult.auth,
+      input,
+      output,
+      name: values.name ?? fileConfig.name,
+      runtimePackage: values.runtime ?? fileConfig.runtimePackage,
+      importExtension:
+        (importExtension as "" | "js" | "ts" | undefined) ?? fileConfig.importExtension,
+      collisionCase:
+        (collisionCase as "snake_case" | "camelCase" | undefined) ?? fileConfig.collisionCase,
+      auth: authResult.auth ?? fileConfig.auth,
     });
 
     for (const warning of result.warnings) io.err(`Warning: ${warning}`);
-    io.out(`Generated ${result.files.length} file(s) into ${values.output}`);
+    io.out(`Generated ${result.files.length} file(s) into ${output}`);
     return 0;
   } catch (error) {
     io.err(`Error: ${(error as Error).message}`);
