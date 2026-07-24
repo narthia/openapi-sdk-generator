@@ -193,7 +193,7 @@ await client.pets.getPetById(
   { petId: 42 },
   {
     extensions: { fetchOptions: { next: { revalidate: 60 } } },
-  },
+  }
 );
 ```
 

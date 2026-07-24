@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
   CollisionCase,
@@ -181,6 +181,9 @@ export async function generateSdk(options: GenerateOptions): Promise<GenerateRes
   }
 
   if (options.output !== undefined) {
+    // Wipe the output directory so stale files from a previous run (removed
+    // operations, renamed services, dropped inputs) never linger.
+    await rm(options.output, { recursive: true, force: true });
     for (const file of files) {
       const outPath = join(options.output, file.path);
       await mkdir(dirname(outPath), { recursive: true });
