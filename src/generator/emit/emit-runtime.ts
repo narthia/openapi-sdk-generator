@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { EmitContext, TransportName } from "./ts-writer.ts";
-import { GENERATED_HEADER } from "./emit-types.ts";
+import { headerLines } from "./emit-types.ts";
 import { defaultTransport } from "./ts-writer.ts";
 
 /** Client-core files copied verbatim (with import rewrites) into `sdk/client/`. */
@@ -30,12 +30,12 @@ export function emitRuntime(ctx: EmitContext): Map<string, string> {
 
   for (const name of CLIENT_FILES) {
     const src = readFileSync(join(RUNTIME_ROOT, "client", name), "utf8");
-    files.set(`client/${name}`, withHeader(rewriteImports(src, ctx)));
+    files.set(`client/${name}`, withHeader(rewriteImports(src, ctx), ctx));
   }
 
   for (const transport of ctx.transports) {
     const src = readFileSync(join(RUNTIME_ROOT, "transports", transport, "index.ts"), "utf8");
-    files.set(`transport/${transport}.ts`, withHeader(rewriteImports(src, ctx)));
+    files.set(`transport/${transport}.ts`, withHeader(rewriteImports(src, ctx), ctx));
   }
 
   return files;
@@ -62,8 +62,8 @@ function rewriteImports(src: string, ctx: EmitContext): string {
   return out;
 }
 
-function withHeader(contents: string): string {
-  return `${GENERATED_HEADER}\n\n${contents}`;
+function withHeader(contents: string, ctx: EmitContext): string {
+  return [...headerLines(ctx), contents].join("\n");
 }
 
 /** Locate the package's `src` dir (which holds the runtime source), walking up from this module. */

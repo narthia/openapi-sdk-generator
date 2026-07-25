@@ -4,11 +4,11 @@ import type { EmitContext } from "./ts-writer.ts";
 import { buildJsDoc } from "../jsdoc.ts";
 import { authConfigTypeName } from "./emit-auth.ts";
 import { serviceFactoryName, serviceProperty } from "./emit-service.ts";
-import { GENERATED_HEADER } from "./emit-types.ts";
+import { headerLines } from "./emit-types.ts";
 import { relativeImport } from "./ts-writer.ts";
 
 export function emitIndex(doc: IrDocument, ctx: EmitContext, hasTypes: boolean): string {
-  const parts: string[] = [GENERATED_HEADER, ""];
+  const parts: string[] = headerLines(ctx);
   const configImport = relativeImport(ctx, "./config");
 
   // `createClient` (and the config/auth types) come from the service-free

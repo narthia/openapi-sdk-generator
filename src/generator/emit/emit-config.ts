@@ -16,12 +16,12 @@ import {
   emitAuthAdapter,
   emitAuthConfigType,
 } from "./emit-auth.ts";
-import { GENERATED_HEADER } from "./emit-types.ts";
+import { headerLines } from "./emit-types.ts";
 import { clientBase, runtimeClientImport } from "./ts-writer.ts";
 
 export function emitConfig(ctx: EmitContext): string {
   const clientImport = runtimeClientImport(ctx, clientBase(ctx.subdirDepth));
-  const parts: string[] = [GENERATED_HEADER, ""];
+  const parts: string[] = headerLines(ctx);
 
   const typeImports = ["ClientConfig", "ClientContext", "Transport"];
   if (ctx.auth) {

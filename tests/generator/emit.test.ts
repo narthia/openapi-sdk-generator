@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
+import { GENERATED_HEADER } from "../../src/generator/emit/emit-types.ts";
 import { generateSdk } from "../../src/index.ts";
 
 const execFileAsync = promisify(execFile);
@@ -229,6 +230,91 @@ describe("type partitioning", () => {
     expect(files.find((f) => f.path === "types/common.ts")!.contents).toContain(
       "export interface Orphan {"
     );
+  });
+});
+
+describe("header option", () => {
+  // Default runtime ("generate") so the inlined client/ and transport/ files,
+  // which take a different header code path, are covered too.
+  const withHeader = () => generateSdk({ input: fixture("petstore-3.0.json") });
+  const noHeader = () => generateSdk({ input: fixture("petstore-3.0.json"), header: false });
+
+  it("emits the header by default", async () => {
+    const { files } = await withHeader();
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      expect(file.contents.startsWith(`${GENERATED_HEADER}\n\n`)).toBe(true);
+    }
+  });
+
+  it("omits only the header and its blank line with `header: false`", async () => {
+    const [on, off] = await Promise.all([withHeader(), noHeader()]);
+
+    expect(off.files.map((f) => f.path)).toEqual(on.files.map((f) => f.path));
+    // The sole difference is the header prefix: every body is byte-identical.
+    for (const [i, file] of off.files.entries()) {
+      expect(`${GENERATED_HEADER}\n\n${file.contents}`).toBe(on.files[i]!.contents);
+    }
+  });
+
+  it("leaves no stray blank first line", async () => {
+    const { files } = await noHeader();
+    for (const file of files) {
+      expect(file.contents).not.toContain(GENERATED_HEADER);
+      expect(file.contents.startsWith("\n")).toBe(false);
+      expect(file.contents.endsWith("\n")).toBe(true);
+    }
+  });
+
+  it("starts the barrel at its first export", async () => {
+    const { files } = await noHeader();
+    expect(files.find((f) => f.path === "types/index.ts")!.contents).toBe(
+      ['export * from "./common";', 'export * from "./pets";', 'export * from "./store";', ""].join(
+        "\n"
+      )
+    );
+  });
+
+  it("treats `header: true` as the default", async () => {
+    const [explicit, implicit] = await Promise.all([
+      generateSdk({ input: fixture("petstore-3.0.json"), header: true }),
+      withHeader(),
+    ]);
+    expect(explicit.files).toEqual(implicit.files);
+  });
+
+  it("compiles with the header omitted", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "narthia-sdk-nohdr-"));
+    headerDirs.push(dir);
+    await generateSdk({
+      input: fixture("petstore-3.0.json"),
+      output: join(dir, "sdk"),
+      header: false,
+    });
+    await writeFile(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          strict: true,
+          noEmit: true,
+          skipLibCheck: true,
+          target: "es2022",
+          module: "esnext",
+          moduleResolution: "bundler",
+          allowImportingTsExtensions: true,
+          lib: ["es2023", "dom", "dom.iterable"],
+        },
+        include: ["sdk/**/*.ts"],
+      }),
+      "utf8"
+    );
+    const tscBin = join(fileURLToPath(new URL("../..", import.meta.url)), "node_modules/.bin/tsc");
+    await expect(execFileAsync(tscBin, ["-p", dir], { cwd: dir })).resolves.toBeDefined();
+  }, 60_000);
+
+  const headerDirs: string[] = [];
+  afterAll(async () => {
+    await Promise.all(headerDirs.map((d) => rm(d, { recursive: true, force: true })));
   });
 });
 

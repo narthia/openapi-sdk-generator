@@ -4,7 +4,7 @@ import { collectRefs } from "../ir.ts";
 /** Emits one `services/<name>.ts` file per service: a factory returning JSDoc'd methods. */
 import { buildJsDoc } from "../jsdoc.ts";
 import { camelCase, propertyKey, snakeCase } from "../names.ts";
-import { GENERATED_HEADER, operationTypes } from "./emit-types.ts";
+import { headerLines, operationTypes } from "./emit-types.ts";
 import {
   clientBase,
   printProperty,
@@ -19,7 +19,7 @@ export function emitService(service: IrService, ctx: EmitContext): string {
     for (const type of operationTypes(op)) collectRefs(type, usedTypes);
   }
 
-  const parts: string[] = [GENERATED_HEADER, ""];
+  const parts: string[] = headerLines(ctx);
   parts.push(
     `import type { ClientContext } from "${runtimeClientImport(ctx, clientBase(ctx.subdirDepth + 1))}";`
   );
