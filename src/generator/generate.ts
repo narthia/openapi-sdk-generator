@@ -58,6 +58,14 @@ export interface SharedOptions {
   /** Output directory. When omitted, files are only returned in memory. */
   output?: string;
   /**
+   * Remove the output directory before writing, so files from a previous run
+   * (removed operations, renamed services, dropped inputs) never linger. Set to
+   * `false` to write over the existing contents instead, leaving unrelated files
+   * in place. Ignored when {@link output} is omitted.
+   * @default true
+   */
+  clean?: boolean;
+  /**
    * Import specifier for the runtime package in generated code (used in `"package"` mode).
    * @default "@narthia/openapi-sdk-generator"
    */
@@ -182,8 +190,13 @@ export async function generateSdk(options: GenerateOptions): Promise<GenerateRes
 
   if (options.output !== undefined) {
     // Wipe the output directory so stale files from a previous run (removed
-    // operations, renamed services, dropped inputs) never linger.
-    await rm(options.output, { recursive: true, force: true });
+    // operations, renamed services, dropped inputs) never linger. Opt out with
+    // `clean: false` to write over the existing contents instead.
+    // `maxRetries` rides out the transient EBUSY/EPERM Windows reports when an
+    // editor, watcher, or virus scanner is holding a generated file open.
+    if (options.clean ?? true) {
+      await rm(options.output, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
     for (const file of files) {
       const outPath = join(options.output, file.path);
       await mkdir(dirname(outPath), { recursive: true });

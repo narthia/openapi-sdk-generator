@@ -32,6 +32,7 @@ npx openapi-sdk-generator --input ./openapi.json --output ./src/sdk
 | `--runtime <pkg>`               | Runtime import specifier used in `package` mode (default: `@narthia/openapi-sdk-generator`)                                               |
 | `--import-ext <ext>`            | Relative-import extension in emitted code: `""`, `js`, or `ts` (default: `""`)                                                            |
 | `--collision-case <case>`       | Case for renamed colliding path/query params: `snake_case` or `camelCase` (default: `snake_case`)                                         |
+| `--no-clean`                    | Keep existing files in the output directory (default: it is emptied first, see [Output cleaning](#output-cleaning))                       |
 | `--auth-type <list>`            | Comma-separated auth schemes to generate: `bearer`, `basic`, `apiKey` (see [Auth](#auth))                                                 |
 | `--basic-username-field <name>` | Rename basic auth's `username` config field (e.g. `email`)                                                                                |
 | `--basic-password-field <name>` | Rename basic auth's `password` config field (e.g. `apitoken`)                                                                             |
@@ -83,6 +84,22 @@ const { files, warnings } = await generateSdk({
 
 Omit `output` to receive `files: { path, contents }[]` without writing to disk.
 
+### Output cleaning
+
+The output directory is **emptied before each run**, so files from a previous generation (removed operations, renamed services, dropped inputs) never linger. Point `output` at a directory the generator owns - anything else in it is deleted.
+
+To write over the existing contents instead, set `clean: false` (or pass `--no-clean`):
+
+```ts
+await generateSdk({
+  input: "./openapi.json",
+  output: "./src/sdk",
+  clean: false, // keep unrelated files; regenerated files are still overwritten
+});
+```
+
+With `clean: false` the generator only writes the files it produces, so stale ones from an earlier run remain. Use it when the output directory also holds files you maintain by hand.
+
 ### Multiple inputs (one shared runtime)
 
 For several related APIs (e.g. Jira + Confluence), pass an `inputs` map instead of a single `input`. Each key becomes a subfolder with its own SDK, auth, and types, and they **share one emitted runtime** at the output root (no per-input copy):
@@ -98,7 +115,7 @@ await generateSdk({
     },
     confluence: {
       input: "./confluence.json",
-      ame: "createConfluence",
+      name: "createConfluence",
       auth: { bearer: {} },
     },
   },
@@ -115,7 +132,7 @@ sdk/
 Then import per input: `import { createJira } from "./sdk/jira"`, `import { getIssue } from "./sdk/jira/services/issues"`.
 
 - `input` and `inputs` are mutually exclusive; a single `input` keeps the flat layout (no subfolder).
-- **Shared** across all inputs: `output`, `runtime`, `transports`, `importExtension`, `runtimePackage`. **Per input**: `input`, `name`, `auth`, `collisionCase`.
+- **Shared** across all inputs: `output`, `clean`, `runtime`, `transports`, `importExtension`, `runtimePackage`. **Per input**: `input`, `name`, `auth`, `collisionCase`.
 - Via the CLI, multiple inputs are configured through a [config file](#config-file)'s `inputs` map (shared flags still override); the per-input flags apply only to a single `--input` run.
 
 ## Use the generated SDK

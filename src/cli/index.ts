@@ -33,6 +33,7 @@ Options:
       --collision-case <c> Case for renamed colliding path/query params: snake_case | camelCase (default: snake_case)
       --runtime-mode <m>   Where the runtime lives: generate (into the SDK) | package (default: generate)
       --transports <list>  Comma-separated transports to generate (default: http); first is the default
+      --no-clean           Keep existing files in the output dir (default: the dir is emptied first)
   -h, --help               Show this help
   -v, --version            Print the version
 
@@ -79,6 +80,7 @@ export async function runCli(
         "collision-case": { type: "string" },
         "runtime-mode": { type: "string" },
         transports: { type: "string" },
+        "no-clean": { type: "boolean" },
         "auth-type": { type: "string" },
         "basic-username-field": { type: "string" },
         "basic-password-field": { type: "string" },
@@ -157,6 +159,9 @@ export async function runCli(
       (importExtension as "" | "js" | "ts" | undefined) ?? fileConfig.importExtension,
     runtime: (runtimeMode as RuntimeMode | undefined) ?? fileConfig.runtime,
     transports: (transports as TransportName[] | undefined) ?? fileConfig.transports,
+    // `--no-clean` is the only direction a flag can express here; without it the
+    // config file decides (and `generateSdk` defaults to cleaning).
+    clean: values["no-clean"] ? false : fileConfig.clean,
   };
 
   // Multi-input is config-file only: per-input auth/name/collisionCase come from
