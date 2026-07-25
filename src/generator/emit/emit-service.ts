@@ -81,6 +81,13 @@ interface FlatPlan {
 function computeFlatPlan(op: IrOperation, collisionCase: CollisionCase): FlatPlan {
   const used = new Set<string>();
 
+  // Reserve the emitted function's own identifiers: the argument names (`ctx`,
+  // `params`, `options`) and the `params` object we destructure locals out of.
+  // A path/query param named one of these must be suffixed, otherwise its
+  // destructured local would shadow/collide with the argument it comes from
+  // (e.g. `const { params } = params` for a spec param literally named `params`).
+  for (const reserved of ["ctx", "params", "options"]) used.add(reserved);
+
   const bodySpread = op.body?.spreadProps !== undefined;
   if (op.body?.spreadProps) for (const name of op.body.spreadProps) used.add(name);
   if (op.body && !bodySpread) used.add("body");

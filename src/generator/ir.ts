@@ -712,7 +712,13 @@ function dedupeUnion(variants: IrType[]): IrType {
     seen.add(key);
     return true;
   });
-  return unique.length === 1 ? unique[0]! : { kind: "union", variants: unique };
+  // `T | unknown` collapses to `unknown` in TypeScript, silently discarding the
+  // useful member. When at least one concrete type is present (e.g. a typed 200
+  // response alongside an untyped 201), drop the redundant `unknown` variants so
+  // the precise type survives. All-unknown unions stay as `unknown`.
+  const concrete = unique.filter((v) => v.kind !== "unknown");
+  const result = concrete.length > 0 ? concrete : unique;
+  return result.length === 1 ? result[0]! : { kind: "union", variants: result };
 }
 
 function withNull(schema: NormalizedSchema, type: IrType): IrType {
