@@ -86,6 +86,19 @@ export interface SharedOptions {
    */
   header?: boolean;
   /**
+   * Strip a `-SNAPSHOT-<sha>` build id from the API version documented on the
+   * generated SDK factory, so regenerating from a redeployed spec does not churn
+   * the output.
+   *
+   * Some providers publish `1001.0.0-SNAPSHOT-<git sha>`, where the suffix
+   * changes on every deploy - and can differ between CDN edges at the same
+   * moment - independently of any API change. With this on, that renders as
+   * `1001.0.0`. Versions without the suffix, including a bare `-SNAPSHOT`, are
+   * left alone.
+   * @default false
+   */
+  normalizeVersion?: boolean;
+  /**
    * Import specifier for the runtime package in generated code (used in `"package"` mode).
    * @default "@narthia/openapi-sdk-generator"
    */
@@ -194,6 +207,7 @@ export async function generateSdk(options: GenerateOptions): Promise<GenerateRes
     runtime: options.runtime ?? "generate",
     transports: resolveTransports(options.transports),
     header: options.header ?? true,
+    normalizeVersion: options.normalizeVersion ?? false,
   } as const;
   const targets = normalizeTargets(options);
 
@@ -248,6 +262,7 @@ type SharedResolved = {
   runtime: RuntimeMode;
   transports: TransportName[];
   header: boolean;
+  normalizeVersion: boolean;
 };
 
 /** Emit all files for one target, prefixing paths with its subfolder. */

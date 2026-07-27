@@ -84,11 +84,11 @@ describe("output directory cleaning", () => {
     await mkdir(join(outDir, "dropped"), { recursive: true });
     await writeFile(join(outDir, "dropped", "index.ts"), "export const gone = true;\n");
 
-    await generateSdk({ output: outDir, inputs: { jira: { input: fixture } } });
+    await generateSdk({ output: outDir, inputs: { catalog: { input: fixture } } });
 
     // A previously generated input that is no longer configured is removed.
     await expect(stat(join(outDir, "dropped"))).rejects.toThrow(/ENOENT/);
-    await expect(stat(join(outDir, "jira", "index.ts"))).resolves.toBeDefined();
+    await expect(stat(join(outDir, "catalog", "index.ts"))).resolves.toBeDefined();
   });
 
   it("cleans by default", async () => {
@@ -227,16 +227,16 @@ describe('output cleaning: "generated"', () => {
     await writeGenerated(join(outDir, "billing", "index.ts"));
     await writeByHand(join(outDir, "billing", "overrides.ts"));
 
-    // `billing` is no longer configured; only `jira` is generated.
+    // `billing` is no longer configured; only `catalog` is generated.
     await generateSdk({
       output: outDir,
       clean: "generated",
-      inputs: { jira: { input: fixture } },
+      inputs: { catalog: { input: fixture } },
     });
 
     await expect(stat(join(outDir, "billing", "index.ts"))).rejects.toThrow(/ENOENT/);
     await expect(stat(join(outDir, "billing", "overrides.ts"))).resolves.toBeDefined();
-    await expect(stat(join(outDir, "jira", "index.ts"))).resolves.toBeDefined();
+    await expect(stat(join(outDir, "catalog", "index.ts"))).resolves.toBeDefined();
   });
 
   it("regenerates emitted files unchanged", async () => {

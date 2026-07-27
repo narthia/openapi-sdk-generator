@@ -3,7 +3,7 @@
 Generate a fully typed, JSDoc-documented TypeScript SDK from an OpenAPI 3.0/3.1 spec.
 
 - **Rich IDE hover** - every service method and type carries JSDoc built from the spec's summaries, descriptions, `@param` docs, `@deprecated`, `@default`, `@format`, and `@see` links.
-- **Modular runtime** - one import initializes the client, another provides the transport. HTTP (fetch) ships today; the `Transport` interface is designed so AWS Lambda, Atlassian Forge, and others slot in without regenerating.
+- **Modular runtime** - one import initializes the client, another provides the transport. HTTP (fetch) ships today; the `Transport` interface is designed so serverless invokes, in-platform bridges, and others slot in without regenerating.
 - **Typed end to end** - path/query/header params, request bodies, and 2xx responses are all typed. Shared schemas live in a common types file; service-specific schemas live alongside their service.
 - **Minimal dependencies** - hand-rolled spec parsing and emission; the CLI uses only Node built-ins.
 
@@ -34,6 +34,7 @@ npx openapi-sdk-generator --input ./openapi.json --output ./src/sdk
 | `--collision-case <case>`       | Case for renamed colliding path/query params: `snake_case` or `camelCase` (default: `snake_case`)                                         |
 | `--clean <mode>`                | Output cleaning: `all`, `generated`, or `none` (default: `all`, see [Output cleaning](#output-cleaning))                                  |
 | `--no-header`                   | Omit the generated-file header comment (see [File header](#file-header))                                                                  |
+| `--normalize-version`           | Strip a `-SNAPSHOT-<sha>` build id from the documented API version (see [API version](#api-version))                                      |
 | `--auth-type <list>`            | Comma-separated auth schemes to generate: `bearer`, `basic`, `apiKey` (see [Auth](#auth))                                                 |
 | `--basic-username-field <name>` | Rename basic auth's `username` config field (e.g. `email`)                                                                                |
 | `--basic-password-field <name>` | Rename basic auth's `password` config field (e.g. `apitoken`)                                                                             |
@@ -140,22 +141,54 @@ await generateSdk({ input, output, header: false, clean: "generated" });
 
 Use `clean: true` or `clean: false` alongside `header: false`.
 
+### API version
+
+The generated SDK factory documents the spec's `info.version`:
+
+```ts
+/**
+ * Create a `Petstore API` SDK client (API version 1.0.0).
+ */
+export function createSdk(config: SdkConfig = {}) {
+```
+
+Some providers append a per-deploy build id to that version, publishing something like `1001.0.0-SNAPSHOT-<git sha>`, where the suffix changes on every redeploy - and can differ between CDN edges at the same moment - independently of any API change. Embedded verbatim, it makes every regeneration produce a one-line diff that reflects nothing but the build id.
+
+Set `normalizeVersion: true` (or pass `--normalize-version`) to strip it, so the output is deterministic:
+
+```ts
+await generateSdk({
+  input: "https://example.com/openapi.json",
+  output: "./src/sdk",
+  normalizeVersion: true, // 1001.0.0-SNAPSHOT-b5920d1e... -> 1001.0.0
+});
+```
+
+Only a trailing `-SNAPSHOT-<hex>` of at least seven characters (a git short sha) is removed. Everything else passes through, including a bare `-SNAPSHOT`, which is stable across deploys and so never causes churn:
+
+| `info.version`                       | With `normalizeVersion: true` |
+| ------------------------------------ | ----------------------------- |
+| `1001.0.0-SNAPSHOT-b5920d1eaef179a2` | `1001.0.0`                    |
+| `1001.0.0-SNAPSHOT`                  | unchanged                     |
+| `1.0.0-SNAPSHOT-rc2`                 | unchanged                     |
+| `1.2.3-beta.1`                       | unchanged                     |
+
 ### Multiple inputs (one shared runtime)
 
-For several related APIs (e.g. Jira + Confluence), pass an `inputs` map instead of a single `input`. Each key becomes a subfolder with its own SDK, auth, and types, and they **share one emitted runtime** at the output root (no per-input copy):
+For several related APIs (e.g. a billing API plus a catalog API), pass an `inputs` map instead of a single `input`. Each key becomes a subfolder with its own SDK, auth, and types, and they **share one emitted runtime** at the output root (no per-input copy):
 
 ```ts
 await generateSdk({
   output: "./src/sdk",
   inputs: {
-    jira: {
-      input: "./jira.json",
-      name: "createJira",
+    billing: {
+      input: "./billing.json",
+      name: "createBilling",
       auth: { basic: { usernameField: "email", passwordField: "apiToken" } },
     },
-    confluence: {
-      input: "./confluence.json",
-      name: "createConfluence",
+    catalog: {
+      input: "./catalog.json",
+      name: "createCatalog",
       auth: { bearer: {} },
     },
   },
@@ -165,14 +198,14 @@ await generateSdk({
 ```
 sdk/
   client/  transport/http.ts   # shared runtime, emitted once
-  jira/        index.ts config.ts services/*.ts types/*.ts
-  confluence/  index.ts config.ts services/*.ts types/*.ts
+  billing/  index.ts config.ts services/*.ts types/*.ts
+  catalog/  index.ts config.ts services/*.ts types/*.ts
 ```
 
-Then import per input: `import { createJira } from "./sdk/jira"`, `import { getIssue } from "./sdk/jira/services/issues"`.
+Then import per input: `import { createBilling } from "./sdk/billing"`, `import { getInvoice } from "./sdk/billing/services/invoices"`.
 
 - `input` and `inputs` are mutually exclusive; a single `input` keeps the flat layout (no subfolder).
-- **Shared** across all inputs: `output`, `clean`, `header`, `runtime`, `transports`, `importExtension`, `runtimePackage`. **Per input**: `input`, `name`, `auth`, `collisionCase`.
+- **Shared** across all inputs: `output`, `clean`, `header`, `normalizeVersion`, `runtime`, `transports`, `importExtension`, `runtimePackage`. **Per input**: `input`, `name`, `auth`, `collisionCase`.
 - Via the CLI, multiple inputs are configured through a [config file](#config-file)'s `inputs` map (shared flags still override); the per-input flags apply only to a single `--input` run.
 
 ## Use the generated SDK

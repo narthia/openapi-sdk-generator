@@ -180,7 +180,7 @@ describe("runCli with a config file", () => {
       JSON.stringify({
         output: outDir,
         inputs: {
-          jira: { input: fixture, name: "createJira" },
+          catalog: { input: fixture, name: "createCatalog" },
           billing: { input: fixture, name: "createBilling" },
         },
       })
@@ -188,7 +188,7 @@ describe("runCli with a config file", () => {
 
     const { io } = captureIo();
     expect(await runCli(["-c", cfg], io)).toBe(0);
-    await expect(stat(join(outDir, "jira", "index.ts"))).resolves.toBeDefined();
+    await expect(stat(join(outDir, "catalog", "index.ts"))).resolves.toBeDefined();
     await expect(stat(join(outDir, "billing", "index.ts"))).resolves.toBeDefined();
     // One shared runtime at the root.
     await expect(stat(join(outDir, "client", "client.ts"))).resolves.toBeDefined();
@@ -198,13 +198,16 @@ describe("runCli with a config file", () => {
     const dir = await makeDir();
     const outDir = join(dir, "sdk");
     const cfg = join(dir, "sdk.config.json");
-    await writeFile(cfg, JSON.stringify({ output: outDir, inputs: { jira: { input: fixture } } }));
+    await writeFile(
+      cfg,
+      JSON.stringify({ output: outDir, inputs: { catalog: { input: fixture } } })
+    );
 
     const { io } = captureIo();
     // --runtime-mode package overrides; no shared runtime should be emitted.
     expect(await runCli(["-c", cfg, "--runtime-mode", "package"], io)).toBe(0);
     await expect(stat(join(outDir, "client"))).rejects.toThrow(/ENOENT/);
-    const config = await readFile(join(outDir, "jira", "config.ts"), "utf8");
+    const config = await readFile(join(outDir, "catalog", "config.ts"), "utf8");
     expect(config).toContain('from "@narthia/openapi-sdk-generator/client"');
   });
 });

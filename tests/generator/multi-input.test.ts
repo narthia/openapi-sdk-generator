@@ -22,9 +22,9 @@ async function generate(options: GenerateOptions) {
 }
 
 const twoInputs = {
-  jira: {
+  catalog: {
     input: fixture31,
-    name: "createJira",
+    name: "createCatalog",
     auth: { basic: { usernameField: "email", passwordField: "apiToken" } },
   },
   billing: { input: fixture30, name: "createBilling", auth: { bearer: {} } },
@@ -70,18 +70,18 @@ describe("multi-input generate mode", () => {
     expect(paths.filter((p) => p === "client/client.ts")).toHaveLength(1);
 
     // Per-input subtrees.
-    expect(paths).toContain("jira/index.ts");
-    expect(paths).toContain("jira/config.ts");
-    expect(paths).toContain("jira/services/pets.ts");
+    expect(paths).toContain("catalog/index.ts");
+    expect(paths).toContain("catalog/config.ts");
+    expect(paths).toContain("catalog/services/pets.ts");
     expect(paths).toContain("billing/index.ts");
     expect(paths).toContain("billing/config.ts");
   });
 
   it("gives each input its own auth in its own config", async () => {
     const { get } = await generate({ inputs: twoInputs });
-    const jira = get("jira/config.ts")!;
-    expect(jira).toContain("email: string;");
-    expect(jira).toContain("apiToken: string;");
+    const catalog = get("catalog/config.ts")!;
+    expect(catalog).toContain("email: string;");
+    expect(catalog).toContain("apiToken: string;");
     const billing = get("billing/config.ts")!;
     expect(billing).toContain("token: ValueOrFactory;");
     expect(billing).not.toContain("email: string;");
@@ -89,10 +89,10 @@ describe("multi-input generate mode", () => {
 
   it("uses depth-correct relative imports to the shared runtime", async () => {
     const { get } = await generate({ inputs: twoInputs });
-    expect(get("jira/config.ts")!).toContain('from "../client"');
-    expect(get("jira/services/pets.ts")!).toContain('from "../../client"');
+    expect(get("catalog/config.ts")!).toContain('from "../client"');
+    expect(get("catalog/services/pets.ts")!).toContain('from "../../client"');
     // Within-subdir imports are unchanged.
-    expect(get("jira/index.ts")!).toContain('from "./config"');
+    expect(get("catalog/index.ts")!).toContain('from "./config"');
   });
 });
 
@@ -101,8 +101,10 @@ describe("multi-input package mode", () => {
     const { paths, get } = await generate({ runtime: "package", inputs: twoInputs });
     expect(paths.some((p) => p.startsWith("client/"))).toBe(false);
     expect(paths.some((p) => p.startsWith("transport/"))).toBe(false);
-    expect(get("jira/config.ts")!).toContain('from "@narthia/openapi-sdk-generator/client"');
-    expect(get("jira/services/pets.ts")!).toContain('from "@narthia/openapi-sdk-generator/client"');
+    expect(get("catalog/config.ts")!).toContain('from "@narthia/openapi-sdk-generator/client"');
+    expect(get("catalog/services/pets.ts")!).toContain(
+      'from "@narthia/openapi-sdk-generator/client"'
+    );
   });
 });
 

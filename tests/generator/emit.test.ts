@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
+import { normalizeApiVersion } from "../../src/generator/emit/emit-index.ts";
 import { GENERATED_HEADER } from "../../src/generator/emit/emit-types.ts";
 import { generateSdk } from "../../src/index.ts";
 
@@ -72,6 +73,107 @@ describe("generateSdk emit (petstore)", () => {
 
     const service = files.find((f) => f.path === "services/pets.ts")!.contents;
     expect(service).toContain('from "../types/index.js"');
+  });
+});
+
+describe("normalizeApiVersion", () => {
+  // Left column is what a provider publishes; right is what should be documented.
+  const cases: [version: string, normalized: string][] = [
+    // The real-world shape: a full 40-char git sha.
+    ["1001.0.0-SNAPSHOT-b5920d1eaef179a2bd7f107d8da95822cab568b5", "1001.0.0"],
+    // A short sha is a build id too.
+    ["1001.0.0-SNAPSHOT-b5920d1e", "1001.0.0"],
+    ["1001.0.0-SNAPSHOT-b5920d1", "1001.0.0"],
+    // Bare -SNAPSHOT is stable across deploys, so it is not churn: keep it.
+    ["1001.0.0-SNAPSHOT", "1001.0.0-SNAPSHOT"],
+    // Below a git short sha, or not hex: a meaningful prerelease tag, not a build id.
+    ["1.0.0-SNAPSHOT-b5920d", "1.0.0-SNAPSHOT-b5920d"],
+    ["1.0.0-SNAPSHOT-rc2", "1.0.0-SNAPSHOT-rc2"],
+    ["1.0.0-SNAPSHOT-2024.11.03", "1.0.0-SNAPSHOT-2024.11.03"],
+    // Ordinary versions are untouched.
+    ["1.0.0", "1.0.0"],
+    ["1.2.3-beta.1", "1.2.3-beta.1"],
+    ["v2", "v2"],
+    ["2024-11-03", "2024-11-03"],
+    // Only a trailing build id is stripped.
+    [
+      "1.0.0-SNAPSHOT-b5920d1eaef179a2bd7f107d8da95822cab568b5+meta",
+      "1.0.0-SNAPSHOT-b5920d1eaef179a2bd7f107d8da95822cab568b5+meta",
+    ],
+  ];
+
+  it.each(cases)("normalizes %s to %s", (version, normalized) => {
+    expect(normalizeApiVersion(version)).toBe(normalized);
+  });
+
+  it("never reduces a version to nothing", () => {
+    // A version that is only a build id keeps its original text.
+    expect(normalizeApiVersion("-SNAPSHOT-b5920d1eaef179a2bd7f107d8da95822")).toBe(
+      "-SNAPSHOT-b5920d1eaef179a2bd7f107d8da95822"
+    );
+  });
+});
+
+describe("normalizeVersion option", () => {
+  const snapshotSpec = (version: string) => ({
+    openapi: "3.1.0",
+    info: { title: "Catalog", version },
+    paths: {
+      "/things": {
+        get: {
+          operationId: "listThings",
+          tags: ["things"],
+          responses: { "204": { description: "ok" } },
+        },
+      },
+    },
+  });
+  const buildSha = "1001.0.0-SNAPSHOT-b5920d1eaef179a2bd7f107d8da95822cab568b5";
+  const indexOf = (files: { path: string; contents: string }[]) =>
+    files.find((f) => f.path === "index.ts")!.contents;
+
+  it("embeds the version verbatim by default", async () => {
+    const { files } = await generateSdk({ input: snapshotSpec(buildSha) });
+    expect(indexOf(files)).toContain(`(API version ${buildSha})`);
+  });
+
+  it("strips the build id when enabled", async () => {
+    const { files } = await generateSdk({ input: snapshotSpec(buildSha), normalizeVersion: true });
+    const index = indexOf(files);
+    expect(index).toContain("(API version 1001.0.0)");
+    expect(index).not.toContain("SNAPSHOT");
+  });
+
+  it("leaves a plain semver untouched when enabled", async () => {
+    const { files } = await generateSdk({ input: snapshotSpec("1.2.3"), normalizeVersion: true });
+    expect(indexOf(files)).toContain("(API version 1.2.3)");
+  });
+
+  it("produces identical output across two different build shas", async () => {
+    // The churn this option exists to prevent: same API, different deploy.
+    const [a, b] = await Promise.all([
+      generateSdk({
+        input: snapshotSpec("1001.0.0-SNAPSHOT-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        normalizeVersion: true,
+      }),
+      generateSdk({
+        input: snapshotSpec("1001.0.0-SNAPSHOT-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        normalizeVersion: true,
+      }),
+    ]);
+    expect(a.files).toEqual(b.files);
+  });
+
+  it("differs across those same two shas without the option", async () => {
+    const [a, b] = await Promise.all([
+      generateSdk({
+        input: snapshotSpec("1001.0.0-SNAPSHOT-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+      }),
+      generateSdk({
+        input: snapshotSpec("1001.0.0-SNAPSHOT-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+      }),
+    ]);
+    expect(a.files).not.toEqual(b.files);
   });
 });
 

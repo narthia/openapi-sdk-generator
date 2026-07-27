@@ -33,8 +33,9 @@ export function emitIndex(doc: IrDocument, ctx: EmitContext, hasTypes: boolean):
   parts.push(`export type { ${reexportTypes.join(", ")} };`);
   parts.push("");
 
+  const version = ctx.normalizeVersion ? normalizeApiVersion(doc.info.version) : doc.info.version;
   const doc_ = buildJsDoc({
-    summary: `Create a \`${doc.info.title}\` SDK client (API version ${doc.info.version}).`,
+    summary: `Create a \`${doc.info.title}\` SDK client (API version ${version}).`,
     description: doc.info.description,
     params: [{ name: "config", description: "Base URL, transport, auth, and default headers." }],
   });
@@ -50,6 +51,26 @@ export function emitIndex(doc: IrDocument, ctx: EmitContext, hasTypes: boolean):
   parts.push("");
   parts.push(`export type ${sdkTypeName(ctx)} = ReturnType<typeof ${ctx.sdkName}>;`);
   return `${parts.join("\n")}\n`;
+}
+
+/**
+ * A `-SNAPSHOT-<sha>` build id: at least a git short sha of hex, anchored to the
+ * end. A bare `-SNAPSHOT` is deliberately not matched - it is stable across
+ * deploys, so it never causes churn.
+ */
+const BUILD_ID_SUFFIX = /-SNAPSHOT-[0-9a-f]{7,}$/i;
+
+/**
+ * Strip a per-deploy build id from an API version so the emitted docs stay
+ * deterministic. Some providers publish `1001.0.0-SNAPSHOT-<git sha>`, where the
+ * suffix changes on every redeploy (and can differ between CDN edges at the same
+ * moment) independently of any API change, so embedding it verbatim churns the
+ * generated output. Versions without that suffix pass through unchanged.
+ */
+export function normalizeApiVersion(version: string): string {
+  const stripped = version.replace(BUILD_ID_SUFFIX, "");
+  // Never reduce a version to nothing: only the build id may be dropped.
+  return stripped === "" ? version : stripped;
 }
 
 function serviceEntry(service: IrService): string[] {

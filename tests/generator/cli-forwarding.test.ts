@@ -47,6 +47,7 @@ const sharedCases = (outDir: string): Record<keyof SharedOptions, unknown> => ({
   output: outDir,
   clean: false,
   header: false,
+  normalizeVersion: true,
   runtimePackage: "my-runtime",
   importExtension: "js",
   runtime: "package",
@@ -90,7 +91,7 @@ describe("CLI option forwarding", () => {
     const dir = await makeDir();
     const expected = sharedCases(join(dir, "sdk"));
     const cfg = join(dir, "sdk.config.json");
-    await writeFile(cfg, JSON.stringify({ inputs: { jira: { input: fixture } }, ...expected }));
+    await writeFile(cfg, JSON.stringify({ inputs: { catalog: { input: fixture } }, ...expected }));
 
     const { io } = captureIo();
     expect(await runCli(["-c", cfg], io)).toBe(0);
