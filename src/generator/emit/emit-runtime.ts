@@ -21,11 +21,13 @@ import { headerLines } from "./emit-types.ts";
 const CLIENT_FILES = ["index.ts", "client.ts", "errors.ts", "serialize.ts", "types.ts"];
 
 /**
- * Transports whose generic source can be inlined into the SDK in `"generate"`
- * mode. Forge is excluded: it depends on the `@forge/api` peer dependency and is
- * always imported from the package instead of copied in.
+ * Transports whose generic source is inlined into the SDK in `"generate"` mode.
+ * Forge is included: its copied `_forge.ts` imports `@forge/api` directly (a bare
+ * specifier left untouched by the import rewrite), so a generate-mode Forge SDK
+ * depends only on `@forge/api` - never on this package. In `"package"` mode the
+ * runtime is not emitted at all and the wrapper imports from the package instead.
  */
-const INLINABLE_TRANSPORTS: readonly string[] = ["http"];
+const INLINABLE_TRANSPORTS: readonly string[] = ["http", "forge"];
 
 const RUNTIME_ROOT = findRuntimeRoot();
 

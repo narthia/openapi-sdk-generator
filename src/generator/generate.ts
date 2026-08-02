@@ -315,10 +315,13 @@ export async function generateSdk(options: GenerateOptions): Promise<GenerateRes
     files.push({ path: "transports/forge.ts", contents: emitTransportForge(rootCtx({ forge })) });
   }
 
-  // Self-contained mode: emit the shared client core + inlinable transports once
-  // at the root. Forge is never inlined (it needs the `@forge/api` peer dep).
+  // Self-contained mode: emit the shared client core + the runtime for every
+  // transport used anywhere, once at the root. The forge runtime imports
+  // `@forge/api` directly, so a generate-mode Forge SDK never references this package.
   if (shared.runtime === "generate") {
-    const inline: TransportName[] = used.http ? ["http"] : [];
+    const inline: TransportName[] = [];
+    if (used.http) inline.push("http");
+    if (used.forge) inline.push("forge");
     for (const [path, contents] of emitRuntime(rootCtx({ transports: inline }))) {
       files.push({ path, contents });
     }

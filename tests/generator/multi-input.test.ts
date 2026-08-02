@@ -174,14 +174,34 @@ describe("multi-input shared transport", () => {
     });
     expect(paths).toContain("transports/forge.ts");
     expect(paths).not.toContain("issues/transports/forge.ts");
-    // Forge is never inlined; there is no generic http used here either.
-    expect(paths).not.toContain("transports/_forge.ts");
+    // Generate mode inlines the forge runtime; the wrapper imports the sibling.
+    expect(paths).toContain("transports/_forge.ts");
+    // No http used here, so no generic http is inlined.
+    expect(paths).not.toContain("transports/_http.ts");
     const forge = get("transports/forge.ts")!;
-    expect(forge).toContain(
-      'import { forgeJira } from "@narthia/openapi-sdk-generator/transports/forge"'
-    );
+    expect(forge).toContain('import { forgeJira } from "./_forge"');
     expect(forge).toContain('return forgeJira({ as: options.as ?? "user" });');
     expect(forge).toContain("export { forgeAs }");
+    // The inlined runtime imports @forge/api directly (its client import rewritten).
+    const inlined = get("transports/_forge.ts")!;
+    expect(inlined).toContain('from "@forge/api"');
+    expect(inlined).toContain('from "../client/types"');
+  });
+
+  it("imports forge from the package in package mode (no inlined runtime)", async () => {
+    const { paths, get } = await generate({
+      runtime: "package",
+      transports: { forge: { product: "confluence" } },
+      inputs: {
+        issues: { input: fixture31, name: "createIssues" },
+        boards: { input: fixture30, name: "createBoards" },
+      },
+    });
+    expect(paths).toContain("transports/forge.ts");
+    expect(paths).not.toContain("transports/_forge.ts");
+    expect(get("transports/forge.ts")!).toContain(
+      'import { forgeConfluence } from "@narthia/openapi-sdk-generator/transports/forge"'
+    );
   });
 });
 

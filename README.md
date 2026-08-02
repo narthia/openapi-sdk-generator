@@ -401,7 +401,7 @@ await generateSdk({ input, output }); // self-contained (default)
 await generateSdk({ input, output, runtime: "package" }); // import from the package
 ```
 
-`transports` is a map that selects which transports the SDK emits and holds each one's generate-time config: `{ http: { auth }, forge: { product, as } }`. Presence of a key enables it; omit `transports` and you get `{ http: {} }`. In `"generate"` mode the generic `http` is inlined (`transports/_http.ts`, with `transports/http.ts` resolving to it); in `"package"` mode it's imported from the package. **Forge is always imported from the package** (it needs the `@forge/api` peer dependency) and is never inlined. See [Atlassian Forge](#atlassian-forge).
+`transports` is a map that selects which transports the SDK emits and holds each one's generate-time config: `{ http: { auth }, forge: { product, as } }`. Presence of a key enables it; omit `transports` and you get `{ http: {} }`. In `"generate"` mode each selected transport's generic runtime is inlined (`transports/_http.ts`, `transports/_forge.ts`, with `transports/http.ts` / `transports/forge.ts` resolving to the sibling); in `"package"` mode they're imported from the package. The inlined Forge runtime imports `@forge/api` directly, so a generate-mode Forge SDK still needs that peer dependency but never references this package. See [Atlassian Forge](#atlassian-forge).
 
 ## Tree-shaking
 
@@ -498,7 +498,7 @@ import { forge, forgeAs } from "./sdk/transports/forge";
 const sdk = createSdk({ transport: forge({ as: "app" }) });
 ```
 
-Because Forge needs the `@forge/api` peer dependency, its wrapper always imports from the package (`@narthia/openapi-sdk-generator/transports/forge`) and is never inlined, even in `runtime: "generate"` mode. You can still use the package factories directly instead of generating a wrapper:
+In `runtime: "generate"` mode the generic Forge runtime is inlined (`transports/_forge.ts`) and the wrapper imports the sibling; the inlined copy imports `@forge/api` directly, so the SDK never references this package (only `@forge/api`, which a Forge app already has). In `runtime: "package"` mode the wrapper imports from `@narthia/openapi-sdk-generator/transports/forge` instead. You can also use the package factories directly instead of generating a wrapper:
 
 ```ts
 import { forgeJira, forgeAs } from "@narthia/openapi-sdk-generator/transports/forge";
