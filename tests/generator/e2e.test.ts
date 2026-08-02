@@ -53,7 +53,7 @@ describe("end-to-end: generate, import, and call", () => {
     // just the surface this test drives.
     type Opts = { headers?: Record<string, string | number | boolean>; signal?: AbortSignal };
     interface PetsSdk {
-      createSdk: (config: { baseUrl?: string; transport?: Transport }) => {
+      createSdk: (config: { transport: Transport }) => {
         pets: {
           listPets: (p?: { limit?: number; tags?: string[] }, o?: Opts) => Promise<unknown>;
           getPetById: (p: { petId: number }, o?: Opts) => Promise<unknown>;
@@ -77,7 +77,7 @@ describe("end-to-end: generate, import, and call", () => {
       return {};
     });
 
-    const sdk = createSdk({ baseUrl: "https://api.example.com", transport });
+    const sdk = createSdk({ transport });
 
     // Flat query params + array response.
     const pets = await sdk.pets.listPets({ limit: 10, tags: ["cute", "small"] });
@@ -120,7 +120,7 @@ describe("end-to-end: generate, import, and call", () => {
     await generateSdk({ input: fixture, output: genDir, importExtension: "ts" });
 
     const { createClient } = (await import(`${genDir}/config.ts`)) as {
-      createClient: (config: { baseUrl?: string; transport?: Transport }) => ClientContext;
+      createClient: (config: { transport: Transport }) => ClientContext;
     };
     const { getPetById } = (await import(`${genDir}/services/pets.ts`)) as {
       getPetById: (
@@ -133,7 +133,7 @@ describe("end-to-end: generate, import, and call", () => {
     const { transport, requests } = stubTransport((req) =>
       req.path === "/pets/7" ? { body: JSON.stringify({ id: 7, name: "Rex" }) } : {}
     );
-    const ctx = createClient({ baseUrl: "https://api.example.com", transport });
+    const ctx = createClient({ transport });
 
     const pet = await getPetById(ctx, { petId: 7 });
     expect(pet).toEqual({ id: 7, name: "Rex" });

@@ -149,7 +149,7 @@ The generated SDK factory documents the spec's `info.version`:
 /**
  * Create a `Petstore API` SDK client (API version 1.0.0).
  */
-export function createSdk(config: SdkConfig = {}) {
+export function createSdk(config: SdkConfig) {
 ```
 
 Some providers append a per-deploy build id to that version, publishing something like `1001.0.0-SNAPSHOT-<git sha>`, where the suffix changes on every redeploy - and can differ between CDN edges at the same moment - independently of any API change. Embedded verbatim, it makes every regeneration produce a one-line diff that reflects nothing but the build id.
@@ -197,9 +197,9 @@ await generateSdk({
 
 ```
 sdk/
-  client/  transport/http.ts   # shared runtime, emitted once
-  billing/  index.ts config.ts services/*.ts types/*.ts
-  catalog/  index.ts config.ts services/*.ts types/*.ts
+  client/  transports/_http.ts             # shared runtime, emitted once
+  billing/  index.ts config.ts transports/http.ts services/*.ts types/*.ts
+  catalog/  index.ts config.ts transports/http.ts services/*.ts types/*.ts
 ```
 
 Then import per input: `import { createBilling } from "./sdk/billing"`, `import { getInvoice } from "./sdk/billing/services/invoices"`.
@@ -210,20 +210,23 @@ Then import per input: `import { createBilling } from "./sdk/billing"`, `import 
 
 ## Use the generated SDK
 
-Two imports: one to initialize the client, one for the transport.
+Two imports: one to initialize the client, one for the transport. Everything backend-specific — `baseUrl`, `auth` — is configured **on the transport**; `createSdk` itself carries only cross-cutting options (`headers`, `onRequest`, `onResponse`).
 
 ```ts
 import { createSdk } from "./sdk";
-import { httpTransport } from "@narthia/openapi-sdk-generator/transports/http";
+import { http } from "./sdk/transports/http";
 
 const client = createSdk({
-  baseUrl: "https://api.example.com",
-  transport: httpTransport(), // this is also the default if omitted
-  auth: { type: "bearer", token: () => getAccessToken() },
+  transport: http({
+    baseUrl: "https://api.example.com",
+    auth: { bearerAuth: () => getAccessToken() }, // named for your spec's schemes
+  }),
 });
 
 const pet = await client.pets.getPetById({ petId: 42 });
 ```
+
+The SDK's own `http` (from `./sdk/transports/http`) carries **typed auth** named for your spec's security schemes (see [Auth](#auth)). Other backends are configured the same way — e.g. `transport: forgeJira({ as: "app" })` for an Atlassian Forge app (see [Forge](#atlassian-forge)).
 
 Each method takes **two arguments**: the **data** first (path params, query params, and the request body's own properties, all merged into one flat object), and an optional **`options`** second (per-request `headers`, `signal`, `extensions`):
 
@@ -296,13 +299,14 @@ Create the client **once** and import it everywhere - it holds no per-request st
 ```ts
 // lib/api.ts
 import { createSdk } from "../sdk";
-import { httpTransport } from "@narthia/openapi-sdk-generator/transports/http";
+import { http } from "../sdk/transports/http";
 
 export const api = createSdk({
-  baseUrl: process.env.API_URL,
-  transport: httpTransport(),
-  // A function is resolved per request, so a long-lived client keeps working as tokens rotate.
-  auth: { type: "bearer", token: () => getAccessToken() },
+  transport: http({
+    baseUrl: process.env.API_URL,
+    // A function is resolved per request, so a long-lived client keeps working as tokens rotate.
+    auth: { bearerAuth: () => getAccessToken() },
+  }),
 });
 ```
 
@@ -312,28 +316,29 @@ import { api } from "./lib/api";
 const pet = await api.pets.getPetById({ petId: 42 });
 ```
 
-Anything that varies per request goes in the second `options` argument (`headers`, `signal`) - not in a new client. Create more than one instance only when the **client-level** config genuinely differs (a different `baseUrl`, transport, or auth identity); reuse each of those too.
+Anything that varies per request goes in the second `options` argument (`headers`, `signal`) - not in a new client. Create more than one instance only when the **transport** genuinely differs (a different base URL, auth identity, or backend); reuse each of those too.
 
 ### Generated output layout
 
 ```
 sdk/
   index.ts              # createSdk(config) wiring all services
-  config.ts             # createClient + SdkConfig (applies your auth); tree-shakeable entry
+  config.ts             # createClient + SdkConfig (cross-cutting config); tree-shakeable entry
+  transports/http.ts    # the SDK's http transport (typed auth), from "./sdk/transports/http"
   services/<name>.ts    # standalone op functions + one factory per tag/service
   types/
     common.ts           # types shared by 2+ services
     <service>.ts        # types used by a single service
     index.ts            # barrel - import type { X } from "../types"
   client/               # generate mode only: the inlined runtime core
-  transport/<name>.ts   # generate mode only: the inlined transport(s)
+  transports/_<name>.ts # generate mode only: the inlined generic transport(s)
 ```
 
 ## Runtime: package vs generated
 
-By default the SDK is **self-contained**: the runtime (client core + transport) is emitted into the output (`client/`, `transport/`), so the generated code has **no dependency** on this package. Control it with `runtime` (`generateSdk`) or `--runtime-mode`:
+By default the SDK is **self-contained**: the runtime (client core + transport) is emitted into the output (`client/`, `transports/`), so the generated code has **no dependency** on this package. Control it with `runtime` (`generateSdk`) or `--runtime-mode`:
 
-- `"generate"` (default) - inline the runtime. Imports resolve to `./client` and `./transport/http`; nothing points at `@narthia/openapi-sdk-generator`.
+- `"generate"` (default) - inline the runtime. The SDK's `transports/http.ts` resolves to a sibling `./_http`; nothing points at `@narthia/openapi-sdk-generator`.
 - `"package"` - import the runtime from the package (`runtimePackage`, default `@narthia/openapi-sdk-generator`). Smaller output; the consumer installs this package. Use when you generate several SDKs in one app and want a single shared runtime.
 
 ```ts
@@ -353,19 +358,20 @@ const pet = await createSdk(config).pets.getPetById({ petId: 42 });
 
 // Tree-shakeable - only getPetById (and the runtime) end up in your bundle:
 import { createClient } from "./sdk/config";
+import { http } from "./sdk/transports/http";
 import { getPetById } from "./sdk/services/pets";
 
-const ctx = createClient({ baseUrl, auth: { email, apiToken } });
+const ctx = createClient({ transport: http({ baseUrl, auth: { email, apiToken } }) });
 const pet = await getPetById(ctx, { petId: 42 });
 ```
 
-Import `createClient` from **`./sdk/config`** (not `./sdk/client`): the `config` module applies your generated auth (field renames + scheme selection), so `createClient` there accepts the same tailored `auth` as `createSdk`. It's a service-free module, so importing it stays tree-shakeable. `import * as pets from "./sdk/services/pets"` then `pets.getPetById(ctx, ...)` tree-shakes too. The standalone functions take `ctx` first (you can't have both a no-client-argument call and tree-shaking); `createSdk` remains for the grouped, no-`ctx` ergonomics.
+Import `createClient` from **`./sdk/config`** (not `./sdk/client`): it's a service-free module, so importing it stays tree-shakeable, and it accepts the same cross-cutting `SdkConfig` as `createSdk`. The typed `http` comes from **`./sdk/transports/http`**. `import * as pets from "./sdk/services/pets"` then `pets.getPetById(ctx, ...)` tree-shakes too. The standalone functions take `ctx` first (you can't have both a no-client-argument call and tree-shaking); `createSdk` remains for the grouped, no-`ctx` ergonomics.
 
 ## Auth
 
-By default `createSdk` accepts the runtime's generic `auth` config (a single `bearer`, `apiKey`, or `basic` scheme), as shown above. You can instead **bake the auth surface into the generated SDK** so the config fields are named for your API and only the schemes you support are allowed. A generated client uses **one** auth scheme (see [Multiple schemes](#multiple-schemes) for how the caller picks).
+Auth is a property of the **HTTP transport**, not the client. The SDK's own `http` (from `./sdk/transports/http`) is **typed to your spec's schemes**: the config fields are named for your API and only the schemes you support are allowed. A generated client uses **one** auth scheme (see [Multiple schemes](#multiple-schemes) for how the caller picks).
 
-Configure it with the `auth` option (`generateSdk`) or the `--auth-*` flags. `auth` is a map keyed by scheme; each entry's field names are yours to choose - for example, rename basic auth's `username`/`password` to `email`/`apitoken`:
+Configure the scheme names with the `auth` option (`generateSdk`) or the `--auth-*` flags. `auth` is a map keyed by scheme; each entry's field names are yours to choose - for example, rename basic auth's `username`/`password` to `email`/`apitoken`:
 
 ```ts
 await generateSdk({
@@ -383,22 +389,27 @@ openapi-sdk-generator -i ./openapi.json -o ./src/sdk \
 A **single** scheme produces a flat config (no discriminant):
 
 ```ts
-const client = createSdk({ auth: { email: "me@example.com", apitoken: "secret" } });
+import { http } from "./sdk/transports/http";
+const client = createSdk({
+  transport: http({ baseUrl, auth: { email: "me@example.com", apitoken: "secret" } }),
+});
 ```
 
 Default field names per type: bearer -> `token`, apiKey -> `value`, basic -> `username` / `password`. Rename any of them with `field` (bearer/apiKey), `usernameField` / `passwordField` (basic), or the matching CLI flags. `apiKey` also needs `in` (`header` or `query`) and the wire `name`.
 
+When the spec has **no** security schemes (and no `auth` option), `./sdk/transports/http` simply re-exports the package's generic `http`, whose `auth` accepts the runtime shape `{ type: "bearer" | "apiKey" | "basic", ... }`.
+
 ### Multiple schemes
 
-List more than one entry in the map when an API supports several auth methods. The generated config becomes a **discriminated union** - the caller picks exactly one at init, and only it is applied:
+List more than one entry in the map when an API supports several auth methods. The transport's `auth` becomes a **discriminated union** - the caller picks exactly one, and only it is applied:
 
 ```ts
 auth: {
   basic: {},
   bearer: { field: "accessToken" },
 };
-// -> createSdk({ auth: { type: "bearer", accessToken: "..." } })
-//    or createSdk({ auth: { type: "basic", username: "...", password: "..." } })
+// -> http({ baseUrl, auth: { type: "bearer", accessToken: "..." } })
+//    or http({ baseUrl, auth: { type: "basic", username: "...", password: "..." } })
 ```
 
 Each scheme is keyed by its `type` (`basic`, `bearer`, `apiKey`), so the map holds at most one of each. Schemes derived from the spec key off their `type` too, falling back to the `securitySchemes` name only when a type appears more than once.
@@ -407,11 +418,22 @@ Each scheme is keyed by its `type` (`basic`, `bearer`, `apiKey`), so the map hol
 
 ### Derived from the spec
 
-When you pass no `auth` option, schemes are derived automatically from the spec's `components.securitySchemes` (`http`/`bearer`, `http`/`basic`, and `apiKey`; `oauth2` / `openIdConnect` are treated as a bearer token), with default field names. Passing an explicit `auth` option overrides this entirely. If neither is present, the generated config falls back to the runtime's generic `auth`.
+When you pass no `auth` option, schemes are derived automatically from the spec's `components.securitySchemes` (`http`/`bearer`, `http`/`basic`, and `apiKey`; `oauth2` / `openIdConnect` are treated as a bearer token), with default field names. Passing an explicit `auth` option overrides this entirely. If neither is present, `./sdk/transports/http` re-exports the generic `http` with the runtime's generic `auth` shape.
+
+## Atlassian Forge
+
+To run a generated SDK **inside an Atlassian Forge app**, use a Forge transport instead of `http` — it routes each request through `@forge/api` (`forgeJira` / `forgeConfluence` / `forgeBitbucket`, with per-call `asApp()`/`asUser()` selection), so there's no `baseUrl` or `auth` to set.
+
+```ts
+import { forgeJira, forgeAs } from "@narthia/openapi-sdk-generator/transports/forge";
+const sdk = createSdk({ transport: forgeJira({ as: "app" }) });
+```
+
+See the [Forge transport README](https://github.com/narthia/openapi-sdk-generator/blob/main/src/transports/forge/README.md) for setup, per-call identity, and limitations.
 
 ## Runtime architecture
 
-The **client core does all OpenAPI-aware work** - path interpolation, query serialization, header/auth merging, body encoding, response decoding, and error normalization. A **transport** is a dumb executor that moves a prepared request to a backend:
+The **client core does the OpenAPI-aware, transport-agnostic work** - path interpolation, query serialization, header merging, body encoding, response decoding, and error normalization. Backend concerns (`baseUrl`, auth) belong to the **transport**, a self-contained executor that moves a prepared request to a backend:
 
 ```ts
 interface Transport {
@@ -419,10 +441,10 @@ interface Transport {
 }
 ```
 
-Because generated code only ever talks to the client core, a transport can be a brand-new backend **or** a wrapper that adds behavior around another transport - no regeneration required. For example, a retry transport that wraps the built-in HTTP one and retries network errors and `5xx` responses with exponential backoff:
+Because generated code only ever talks to the client core, a transport can be a brand-new backend **or** a wrapper that adds behavior around another transport - no regeneration required. For example, a retry transport that wraps the HTTP one and retries network errors and `5xx` responses with exponential backoff:
 
 ```ts
-import { httpTransport } from "@narthia/openapi-sdk-generator/transports/http";
+import { http } from "@narthia/openapi-sdk-generator/transports/http";
 import type { Transport } from "@narthia/openapi-sdk-generator/client";
 
 function withRetry(inner: Transport, retries = 3): Transport {
@@ -441,17 +463,18 @@ function withRetry(inner: Transport, retries = 3): Transport {
   };
 }
 
-// Compose it with the built-in HTTP transport - the generated SDK is unchanged:
-const client = createSdk({ transport: withRetry(httpTransport()) });
+// Compose it with any transport - the generated SDK is unchanged:
+const client = createSdk({ transport: withRetry(http({ baseUrl: "https://api.example.com" })) });
 ```
 
 ## Exports
 
-| Import                                           | Purpose                                             |
-| ------------------------------------------------ | --------------------------------------------------- |
-| `@narthia/openapi-sdk-generator`                 | The generator: `generateSdk()`                      |
-| `@narthia/openapi-sdk-generator/client`          | Runtime core: `createClient`, `ApiError`, and types |
-| `@narthia/openapi-sdk-generator/transports/http` | Fetch-based `httpTransport()`                       |
+| Import                                            | Purpose                                                              |
+| ------------------------------------------------- | -------------------------------------------------------------------- |
+| `@narthia/openapi-sdk-generator`                  | The generator: `generateSdk()`                                       |
+| `@narthia/openapi-sdk-generator/client`           | Runtime core: `createClient`, `ApiError`, and types                  |
+| `@narthia/openapi-sdk-generator/transports/http`  | Generic fetch-based `http({ baseUrl, auth })`                        |
+| `@narthia/openapi-sdk-generator/transports/forge` | Forge `forgeJira` / `forgeConfluence` / `forgeBitbucket` / `forgeAs` |
 
 ## Current limitations
 

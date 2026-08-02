@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TransportRequest } from "../../src/client/index.ts";
-import { httpTransport } from "../../src/transports/http/index.ts";
+import { http } from "../../src/transports/http/index.ts";
 
 function fakeFetch(body = "{}", init: ResponseInit = { status: 200 }) {
   const calls: { url: string; init: RequestInit }[] = [];
@@ -15,20 +15,20 @@ function makeRequest(overrides: Partial<TransportRequest> = {}): TransportReques
   return {
     method: "get",
     path: "/pets",
-    baseUrl: "https://api.example.com",
     query: new URLSearchParams(),
     headers: {},
     ...overrides,
   };
 }
 
-describe("httpTransport", () => {
+describe("http transport", () => {
   it("joins baseUrl and path regardless of slashes", async () => {
     const { fetch, calls } = fakeFetch();
-    const transport = httpTransport({ fetch });
 
-    await transport.request(makeRequest({ baseUrl: "https://api.example.com/" }));
-    await transport.request(makeRequest({ baseUrl: "https://api.example.com/v2", path: "pets" }));
+    await http({ baseUrl: "https://api.example.com/", fetch }).request(makeRequest());
+    await http({ baseUrl: "https://api.example.com/v2", fetch }).request(
+      makeRequest({ path: "pets" })
+    );
 
     expect(calls[0]!.url).toBe("https://api.example.com/pets");
     expect(calls[1]!.url).toBe("https://api.example.com/v2/pets");
@@ -36,7 +36,7 @@ describe("httpTransport", () => {
 
   it("appends the query string only when non-empty", async () => {
     const { fetch, calls } = fakeFetch();
-    const transport = httpTransport({ fetch });
+    const transport = http({ baseUrl: "https://api.example.com", fetch });
 
     await transport.request(makeRequest({ query: new URLSearchParams({ limit: "10" }) }));
     await transport.request(makeRequest());
@@ -47,7 +47,7 @@ describe("httpTransport", () => {
 
   it("passes method, headers, body, and signal to fetch", async () => {
     const { fetch, calls } = fakeFetch();
-    const transport = httpTransport({ fetch });
+    const transport = http({ baseUrl: "https://api.example.com", fetch });
     const controller = new AbortController();
 
     await transport.request(
@@ -72,7 +72,11 @@ describe("httpTransport", () => {
       status: 201,
       headers: { "x-req-id": "r1" },
     });
-    const transport = httpTransport({ fetch, fetchOptions: { credentials: "include" } });
+    const transport = http({
+      baseUrl: "https://api.example.com",
+      fetch,
+      fetchOptions: { credentials: "include" },
+    });
 
     const res = await transport.request(makeRequest());
 
@@ -80,5 +84,77 @@ describe("httpTransport", () => {
     expect(res.status).toBe(201);
     expect(res.headers["x-req-id"]).toBe("r1");
     await expect(res.text()).resolves.toBe('{"ok":true}');
+  });
+
+  describe("auth", () => {
+    it("applies bearer auth from an async factory", async () => {
+      const { fetch, calls } = fakeFetch();
+      const transport = http({
+        baseUrl: "https://api.example.com",
+        fetch,
+        auth: { type: "bearer", token: () => Promise.resolve("tok") },
+      });
+
+      await transport.request(makeRequest());
+
+      expect((calls[0]!.init.headers as Record<string, string>)["authorization"]).toBe(
+        "Bearer tok"
+      );
+    });
+
+    it("applies apiKey auth in the query string", async () => {
+      const { fetch, calls } = fakeFetch();
+      const transport = http({
+        baseUrl: "https://api.example.com",
+        fetch,
+        auth: { type: "apiKey", in: "query", name: "api_key", value: "k1" },
+      });
+
+      await transport.request(makeRequest());
+
+      expect(calls[0]!.url).toBe("https://api.example.com/pets?api_key=k1");
+    });
+
+    it("applies apiKey auth in a header", async () => {
+      const { fetch, calls } = fakeFetch();
+      const transport = http({
+        baseUrl: "https://api.example.com",
+        fetch,
+        auth: { type: "apiKey", in: "header", name: "X-API-Key", value: "k1" },
+      });
+
+      await transport.request(makeRequest());
+
+      expect((calls[0]!.init.headers as Record<string, string>)["x-api-key"]).toBe("k1");
+    });
+
+    it("applies basic auth (UTF-8 safe base64)", async () => {
+      const { fetch, calls } = fakeFetch();
+      const transport = http({
+        baseUrl: "https://api.example.com",
+        fetch,
+        auth: { type: "basic", username: "a@b.com", password: "secret" },
+      });
+
+      await transport.request(makeRequest());
+
+      const expected = `Basic ${btoa("a@b.com:secret")}`;
+      expect((calls[0]!.init.headers as Record<string, string>)["authorization"]).toBe(expected);
+    });
+
+    it("does not mutate the caller's request headers or query", async () => {
+      const { fetch } = fakeFetch();
+      const transport = http({
+        baseUrl: "https://api.example.com",
+        fetch,
+        auth: { type: "bearer", token: "tok" },
+      });
+      const req = makeRequest();
+
+      await transport.request(req);
+
+      expect(req.headers["authorization"]).toBeUndefined();
+      expect(req.query.toString()).toBe("");
+    });
   });
 });

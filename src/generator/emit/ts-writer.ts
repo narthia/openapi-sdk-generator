@@ -81,6 +81,23 @@ export function defaultTransport(ctx: EmitContext): TransportName {
   return ctx.transports[0] ?? "http";
 }
 
+/**
+ * Import specifier for a runtime transport module from a generated
+ * `<subdir>/transports/<name>.ts` wrapper file: the package subpath in
+ * `"package"` mode, or a relative path to the generic transport copied at the
+ * output root (`transports/_<name>.ts`) in `"generate"` mode.
+ */
+export function runtimeTransportImport(ctx: EmitContext, name: TransportName): string {
+  if (ctx.runtime === "generate") {
+    const base =
+      ctx.subdirDepth === 0
+        ? `./_${name}`
+        : `${"../".repeat(ctx.subdirDepth + 1)}transports/_${name}`;
+    return relativeImport(ctx, base);
+  }
+  return `${ctx.runtimePackage}/transports/${name}`;
+}
+
 /** Render a relative import specifier honoring the configured extension. */
 export function relativeImport(ctx: EmitContext, path: string, isDirectory = false): string {
   if (ctx.importExtension === "") return path;

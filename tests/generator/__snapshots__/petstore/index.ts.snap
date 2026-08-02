@@ -15,9 +15,9 @@ export type { ClientConfig, ClientContext, SdkConfig, Transport };
  *
  * A sample API for testing the SDK generator.
  *
- * @param config - Base URL, transport, auth, and default headers.
+ * @param config - Transport plus cross-cutting options (headers, interceptors).
  */
-export function createSdk(config: SdkConfig = {}) {
+export function createSdk(config: SdkConfig) {
   const ctx = createClient(config);
   return {
     /** Everything about pets */

@@ -10,6 +10,6 @@ export type { ClientConfig, ClientContext, Transport };
 export type SdkConfig = ClientConfig;
 
 /** Create a client context for this SDK. */
-export function createClient(config: SdkConfig = {}) {
+export function createClient(config: SdkConfig) {
   return createRuntimeClient(config);
 }

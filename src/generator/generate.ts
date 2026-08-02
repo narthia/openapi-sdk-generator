@@ -17,6 +17,7 @@ import { emitConfig } from "./emit/emit-config.ts";
 import { emitIndex } from "./emit/emit-index.ts";
 import { emitRuntime } from "./emit/emit-runtime.ts";
 import { emitService } from "./emit/emit-service.ts";
+import { emitTransportHttp } from "./emit/emit-transport-http.ts";
 import { emitTypesFolder, partitionSchemas } from "./emit/emit-types.ts";
 import { buildIr } from "./ir.ts";
 import { loadSpec } from "./load.ts";
@@ -111,7 +112,7 @@ export interface SharedOptions {
   importExtension?: "" | "js" | "ts";
   /**
    * Where the runtime (client core + transports) lives:
-   * - `"generate"` (default): emit it into the SDK folder (`client/`, `transport/`)
+   * - `"generate"` (default): emit it into the SDK folder (`client/`, `transports/`)
    *   so the output is self-contained with no dependency on this package. With
    *   multiple inputs, one shared runtime is emitted at the output root.
    * - `"package"`: import it from {@link runtimePackage} instead.
@@ -295,6 +296,7 @@ async function generateTarget(
     });
   }
   files.push({ path: `${prefix}config.ts`, contents: emitConfig(ctx) });
+  files.push({ path: `${prefix}transports/http.ts`, contents: emitTransportHttp(ctx) });
   files.push({ path: `${prefix}index.ts`, contents: emitIndex(ir, ctx, typeFiles.size > 0) });
 
   return { files, warnings: ir.warnings };

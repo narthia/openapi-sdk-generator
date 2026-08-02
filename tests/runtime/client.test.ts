@@ -31,7 +31,6 @@ describe("createClient", () => {
       text: () => Promise.resolve('{"id":"42"}'),
     }));
     const ctx = createClient({
-      baseUrl: "https://api.example.com",
       transport,
       headers: { "x-app": "test" },
     });
@@ -50,7 +49,6 @@ describe("createClient", () => {
     const req = requests[0]!;
     expect(req.method).toBe("post");
     expect(req.path).toBe("/users/a%20b/notes");
-    expect(req.baseUrl).toBe("https://api.example.com");
     expect(req.query.getAll("expand")).toEqual(["profile", "roles"]);
     expect(req.headers).toMatchObject({
       "x-app": "test",
@@ -59,36 +57,6 @@ describe("createClient", () => {
       accept: "application/json",
     });
     expect(req.body).toBe('{"text":"hi"}');
-  });
-
-  it("applies bearer auth from an async factory", async () => {
-    const { transport, requests } = stubTransport();
-    const ctx = createClient({
-      transport,
-      auth: { type: "bearer", token: () => Promise.resolve("tok-123") },
-    });
-    await ctx.request({ method: "get", path: "/me" });
-    expect(requests[0]!.headers["authorization"]).toBe("Bearer tok-123");
-  });
-
-  it("applies apiKey auth in query", async () => {
-    const { transport, requests } = stubTransport();
-    const ctx = createClient({
-      transport,
-      auth: { type: "apiKey", in: "query", name: "api_key", value: "k1" },
-    });
-    await ctx.request({ method: "get", path: "/pets" });
-    expect(requests[0]!.query.get("api_key")).toBe("k1");
-  });
-
-  it("applies basic auth", async () => {
-    const { transport, requests } = stubTransport();
-    const ctx = createClient({
-      transport,
-      auth: { type: "basic", username: "user", password: "pass" },
-    });
-    await ctx.request({ method: "get", path: "/" });
-    expect(requests[0]!.headers["authorization"]).toBe(`Basic ${btoa("user:pass")}`);
   });
 
   it("throws ApiError with parsed body on non-2xx", async () => {

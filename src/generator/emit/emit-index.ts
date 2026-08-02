@@ -2,7 +2,6 @@ import type { IrDocument, IrService } from "../ir.ts";
 import type { EmitContext } from "./ts-writer.ts";
 /** Emits the generated SDK's `index.ts`: the `createSdk` factory wiring all services. */
 import { buildJsDoc } from "../jsdoc.ts";
-import { authConfigTypeName } from "./emit-auth.ts";
 import { serviceFactoryName, serviceProperty } from "./emit-service.ts";
 import { headerLines } from "./emit-types.ts";
 import { relativeImport } from "./ts-writer.ts";
@@ -14,7 +13,6 @@ export function emitIndex(doc: IrDocument, ctx: EmitContext, hasTypes: boolean):
   // `createClient` (and the config/auth types) come from the service-free
   // `./config` module, so the tree-shakeable path shares the same auth handling.
   const reexportTypes = ["ClientConfig", "ClientContext", "SdkConfig", "Transport"];
-  if (ctx.auth) reexportTypes.push(authConfigTypeName(ctx));
   reexportTypes.sort();
 
   parts.push(`import { ApiError, createClient } from "${configImport}";`);
@@ -37,10 +35,15 @@ export function emitIndex(doc: IrDocument, ctx: EmitContext, hasTypes: boolean):
   const doc_ = buildJsDoc({
     summary: `Create a \`${doc.info.title}\` SDK client (API version ${version}).`,
     description: doc.info.description,
-    params: [{ name: "config", description: "Base URL, transport, auth, and default headers." }],
+    params: [
+      {
+        name: "config",
+        description: "Transport plus cross-cutting options (headers, interceptors).",
+      },
+    ],
   });
   if (doc_) parts.push(doc_);
-  parts.push(`export function ${ctx.sdkName}(config: SdkConfig = {}) {`);
+  parts.push(`export function ${ctx.sdkName}(config: SdkConfig) {`);
   parts.push("  const ctx = createClient(config);");
   parts.push("  return {");
   for (const service of doc.services) {

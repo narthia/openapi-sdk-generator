@@ -28,6 +28,7 @@ describe("generateSdk emit (petstore)", () => {
       "services/store.ts",
       "services/health.ts",
       "config.ts",
+      "transports/http.ts",
       "index.ts",
     ]);
     expect(warnings).toEqual([]);
@@ -60,7 +61,7 @@ describe("generateSdk emit (petstore)", () => {
     });
     const index = files.find((f) => f.path === "index.ts")!.contents;
     expect(index).toContain('from "./config.js"');
-    expect(index).toContain("export function createPetstore(config: SdkConfig = {})");
+    expect(index).toContain("export function createPetstore(config: SdkConfig)");
     expect(index).toContain(
       "export type CreatePetstoreClient = ReturnType<typeof createPetstore>;"
     );
@@ -470,6 +471,9 @@ describe("generated code validity", () => {
     });
     await writeTsconfig(dir, {
       "@narthia/openapi-sdk-generator/client": [join(repoRoot, "src/client/index.ts")],
+      "@narthia/openapi-sdk-generator/transports/http": [
+        join(repoRoot, "src/transports/http/index.ts"),
+      ],
     });
     await expect(execFileAsync(tsc, ["-p", dir], { cwd: dir })).resolves.toBeDefined();
   }, 60_000);

@@ -5,16 +5,17 @@
  *
  * The real runtime source (`src/client/*`, `src/transports/*`) is the single
  * source of truth: it is read at generate time and its relative imports are
- * rewritten for the generated layout (`client/*`, `transport/*.ts`) and the
+ * rewritten for the generated layout (`client/*`, `transports/_*.ts`) and the
  * configured `importExtension`. The package ships those source dirs (see
- * `files` in package.json) so the built CLI can read them.
+ * `files` in package.json) so the built CLI can read them. The generic transport
+ * is copied under an underscore name (`transports/_http.ts`) so it never collides
+ * with the per-SDK typed wrapper emitted at `transports/http.ts`.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { EmitContext, TransportName } from "./ts-writer.ts";
+import type { EmitContext } from "./ts-writer.ts";
 import { headerLines } from "./emit-types.ts";
-import { defaultTransport } from "./ts-writer.ts";
 
 /** Client-core files copied verbatim (with import rewrites) into `sdk/client/`. */
 const CLIENT_FILES = ["index.ts", "client.ts", "errors.ts", "serialize.ts", "types.ts"];
@@ -23,7 +24,7 @@ const RUNTIME_ROOT = findRuntimeRoot();
 
 /**
  * Build the generated runtime files. Returns a map of output path → contents,
- * e.g. `client/client.ts`, `transport/http.ts`.
+ * e.g. `client/client.ts`, `transports/_http.ts`.
  */
 export function emitRuntime(ctx: EmitContext): Map<string, string> {
   const files = new Map<string, string>();
@@ -35,20 +36,17 @@ export function emitRuntime(ctx: EmitContext): Map<string, string> {
 
   for (const transport of ctx.transports) {
     const src = readFileSync(join(RUNTIME_ROOT, "transports", transport, "index.ts"), "utf8");
-    files.set(`transport/${transport}.ts`, withHeader(rewriteImports(src, ctx), ctx));
+    files.set(`transports/_${transport}.ts`, withHeader(rewriteImports(src, ctx), ctx));
   }
 
   return files;
 }
 
-/** Rewrite the runtime's relative imports for the generated `client/` + `transport/` layout. */
+/** Rewrite the runtime's relative imports for the generated `client/` + `transports/` layout. */
 function rewriteImports(src: string, ctx: EmitContext): string {
-  const transport: TransportName = defaultTransport(ctx);
-  let out = src
-    // client.ts default transport import: `../transports/http/index.ts` → `../transport/http`
-    .replaceAll(`../transports/${transport}/index.ts`, `../transport/${transport}`)
-    // transport files reference the client types across the folder boundary.
-    .replaceAll("../../client/types.ts", "../client/types");
+  // A generic transport at `transports/_<name>.ts` reaches the client types at
+  // `../client/types` (source imports `../../client/types.ts`).
+  let out = src.replaceAll("../../client/types.ts", "../client/types");
 
   // Drop the `.ts` extension from the remaining relative (sibling) imports.
   out = out.replace(/from "(\.[^"]+)\.ts"/g, 'from "$1"');

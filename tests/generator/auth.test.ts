@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
-import type { Transport, TransportRequest } from "../../src/client/index.ts";
+import type { Transport } from "../../src/client/index.ts";
 import type { IrAuthScheme } from "../../src/generator/ir.ts";
 import type { AuthOption } from "../../src/index.ts";
 import { resolveAuthModel } from "../../src/generator/generate.ts";
@@ -94,45 +94,47 @@ describe("resolveAuthModel", () => {
   });
 });
 
-describe("emitted auth config", () => {
+describe("emitted auth transport", () => {
   it("emits a flat config and adapter for a single renamed basic scheme", async () => {
     const get = await generateFiles({
       basic: { usernameField: "email", passwordField: "apitoken" },
     });
-    const config = get("config.ts");
-    expect(config).toContain("export interface CreateSdkAuthConfig {");
-    expect(config).toContain("email: string;");
-    expect(config).toContain("apitoken: string;");
-    expect(config).toContain(
+    const httpMod = get("transports/http.ts");
+    expect(httpMod).toContain("export interface CreateSdkAuthConfig {");
+    expect(httpMod).toContain("email: string;");
+    expect(httpMod).toContain("apitoken: string;");
+    expect(httpMod).toContain(
       'return { type: "basic", username: auth.email, password: auth.apitoken };'
     );
-    expect(config).toContain(
-      'export type SdkConfig = Omit<ClientConfig, "auth"> & { auth?: CreateSdkAuthConfig };'
-    );
-    expect(config).not.toContain("AuthConfig[]");
-    // index wires createSdk against the shared config.
-    expect(get("index.ts")).toContain("export function createSdk(config: SdkConfig = {})");
+    expect(httpMod).toContain("export function http(options: HttpOptions): Transport {");
+    expect(httpMod).not.toContain("AuthConfig[]");
+    // The client config stays auth-free.
+    expect(get("config.ts")).toContain("export type SdkConfig = ClientConfig;");
+    // index wires createSdk against the shared config (transport is required).
+    expect(get("index.ts")).toContain("export function createSdk(config: SdkConfig)");
   });
 
   it("emits a discriminated union for multiple schemes (pick one)", async () => {
-    const config = (await generateFiles({ basic: {}, bearer: {} }))("config.ts");
-    expect(config).toContain(
+    const httpMod = (await generateFiles({ basic: {}, bearer: {} }))("transports/http.ts");
+    expect(httpMod).toContain(
       "export type CreateSdkAuthConfig = CreateSdkAuthConfigBasic | CreateSdkAuthConfigBearer;"
     );
-    expect(config).toContain('type: "basic";');
-    expect(config).toContain("switch (auth.type) {");
-    expect(config).toContain("function toRuntimeAuth(auth: CreateSdkAuthConfig): AuthConfig {");
+    expect(httpMod).toContain('type: "basic";');
+    expect(httpMod).toContain("switch (auth.type) {");
+    expect(httpMod).toContain("function toRuntimeAuth(auth: CreateSdkAuthConfig): AuthConfig {");
   });
 
-  it("omits auth codegen entirely when nothing is configured", async () => {
+  it("re-exports the generic http and omits auth codegen when nothing is configured", async () => {
     const get = await generateFiles(undefined);
+    const httpMod = get("transports/http.ts");
+    expect(httpMod).toContain("export { http }");
+    expect(httpMod).not.toContain("toRuntimeAuth");
     expect(get("config.ts")).toContain("export type SdkConfig = ClientConfig;");
-    expect(get("config.ts")).not.toContain("toRuntimeAuth");
-    expect(get("index.ts")).toContain("export function createSdk(config: SdkConfig = {})");
+    expect(get("index.ts")).toContain("export function createSdk(config: SdkConfig)");
   });
 
   it("derives auth from the spec's securitySchemes as a fallback", async () => {
-    const config = (
+    const httpMod = (
       await generateFiles(
         undefined,
         spec({
@@ -140,10 +142,10 @@ describe("emitted auth config", () => {
           BearerAuth: { type: "http", scheme: "bearer" },
         })
       )
-    )("config.ts");
-    expect(config).toContain("toRuntimeAuth");
-    expect(config).toContain('name: "X-API-Key"');
-    expect(config).toContain("switch (auth.type) {");
+    )("transports/http.ts");
+    expect(httpMod).toContain("toRuntimeAuth");
+    expect(httpMod).toContain('name: "X-API-Key"');
+    expect(httpMod).toContain("switch (auth.type) {");
   });
 });
 
@@ -186,6 +188,9 @@ describe("generated auth SDKs", () => {
           lib: ["es2023", "dom", "dom.iterable"],
           paths: {
             "@narthia/openapi-sdk-generator/client": [join(repoRoot, "src/client/index.ts")],
+            "@narthia/openapi-sdk-generator/transports/http": [
+              join(repoRoot, "src/transports/http/index.ts"),
+            ],
           },
         },
         include: ["**/*.ts"],
@@ -202,36 +207,46 @@ describe("generated auth SDKs", () => {
     await generateSdk({
       input: spec(),
       output: e2eDir,
+      // Package mode against this repo's source so the generated typed `http`
+      // links to the same generic transport the test resolves.
+      runtime: "package",
       runtimePackage: `${repoRoot.replace(/\/$/, "")}/src`,
       importExtension: "ts",
       auth: { basic: { usernameField: "email", passwordField: "apitoken" } },
     });
 
-    const requests: TransportRequest[] = [];
-    const transport: Transport = {
-      request: (req) => {
-        requests.push(req);
-        return Promise.resolve({
-          status: 200,
-          statusText: "OK",
-          headers: { "content-type": "application/json" },
-          text: () => Promise.resolve("{}"),
-          arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
-        });
-      },
-    };
+    // Capture the outgoing fetch so we can assert the adapted Authorization header.
+    const calls: { init: RequestInit }[] = [];
+    const fetch = ((_url: string | URL, init?: RequestInit) => {
+      calls.push({ init: init ?? {} });
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    }) as typeof globalThis.fetch;
 
     interface AuthSdk {
-      createSdk: (config: {
-        transport?: Transport;
+      createSdk: (config: { transport: Transport }) => { main: { ping: () => Promise<unknown> } };
+    }
+    interface AuthHttp {
+      http: (options: {
+        baseUrl: string;
         auth?: { email: string; apitoken: string };
-      }) => { main: { ping: () => Promise<unknown> } };
+        fetch?: typeof globalThis.fetch;
+      }) => Transport;
     }
     const { createSdk } = (await import(`${e2eDir}/index.ts`)) as AuthSdk;
-    const sdk = createSdk({ transport, auth: { email: "a@b.com", apitoken: "secret" } });
+    const { http } = (await import(`${e2eDir}/transports/http.ts`)) as AuthHttp;
+
+    const sdk = createSdk({
+      transport: http({
+        baseUrl: "https://api.example.com",
+        auth: { email: "a@b.com", apitoken: "secret" },
+        fetch,
+      }),
+    });
     await sdk.main.ping();
 
-    expect(requests[0]!.headers["authorization"]).toBe(`Basic ${btoa("a@b.com:secret")}`);
+    expect((calls[0]!.init.headers as Record<string, string>)["authorization"]).toBe(
+      `Basic ${btoa("a@b.com:secret")}`
+    );
 
     await rm(e2eDir, { recursive: true, force: true });
   });

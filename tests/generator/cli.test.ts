@@ -92,7 +92,7 @@ describe("runCli", () => {
     const outDir = await makeOut();
     expect(await runCli(["-i", fixture, "-o", outDir], io)).toBe(0);
     await expect(stat(join(outDir, "client", "client.ts"))).resolves.toBeDefined();
-    await expect(stat(join(outDir, "transport", "http.ts"))).resolves.toBeDefined();
+    await expect(stat(join(outDir, "transports", "_http.ts"))).resolves.toBeDefined();
   });
 
   it("generates files to disk and reports the count", async () => {
@@ -133,9 +133,9 @@ describe("runCli", () => {
         io
       )
     ).toBe(0);
-    const config = await readFile(join(outDir, "config.ts"), "utf8");
-    expect(config).toContain("email: string;");
-    expect(config).toContain("apitoken: string;");
+    const httpMod = await readFile(join(outDir, "transports/http.ts"), "utf8");
+    expect(httpMod).toContain("email: string;");
+    expect(httpMod).toContain("apitoken: string;");
   });
 });
 

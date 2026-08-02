@@ -66,7 +66,7 @@ describe("multi-input generate mode", () => {
 
     // Shared runtime at the root, emitted once.
     expect(paths).toContain("client/client.ts");
-    expect(paths).toContain("transport/http.ts");
+    expect(paths).toContain("transports/_http.ts");
     expect(paths.filter((p) => p === "client/client.ts")).toHaveLength(1);
 
     // Per-input subtrees.
@@ -77,12 +77,12 @@ describe("multi-input generate mode", () => {
     expect(paths).toContain("billing/config.ts");
   });
 
-  it("gives each input its own auth in its own config", async () => {
+  it("gives each input its own auth in its own http transport", async () => {
     const { get } = await generate({ inputs: twoInputs });
-    const catalog = get("catalog/config.ts")!;
+    const catalog = get("catalog/transports/http.ts")!;
     expect(catalog).toContain("email: string;");
     expect(catalog).toContain("apiToken: string;");
-    const billing = get("billing/config.ts")!;
+    const billing = get("billing/transports/http.ts")!;
     expect(billing).toContain("token: ValueOrFactory;");
     expect(billing).not.toContain("email: string;");
   });
@@ -100,7 +100,9 @@ describe("multi-input package mode", () => {
   it("imports the package from every subtree and emits no runtime", async () => {
     const { paths, get } = await generate({ runtime: "package", inputs: twoInputs });
     expect(paths.some((p) => p.startsWith("client/"))).toBe(false);
-    expect(paths.some((p) => p.startsWith("transport/"))).toBe(false);
+    // No copied generic runtime; each subtree keeps its own typed http wrapper.
+    expect(paths).not.toContain("transports/_http.ts");
+    expect(paths).toContain("catalog/transports/http.ts");
     expect(get("catalog/config.ts")!).toContain('from "@narthia/openapi-sdk-generator/client"');
     expect(get("catalog/services/pets.ts")!).toContain(
       'from "@narthia/openapi-sdk-generator/client"'

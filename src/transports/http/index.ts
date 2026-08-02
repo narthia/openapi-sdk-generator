@@ -1,7 +1,11 @@
-import type { Transport } from "../../client/types.ts";
+import type { AuthConfig, Transport, ValueOrFactory } from "../../client/types.ts";
 
-/** Options for {@link httpTransport}. */
-export interface HttpTransportOptions {
+/** Options for {@link http}. */
+export interface HttpOptions {
+  /** Base URL requests are resolved against, e.g. `https://api.example.com/v2`. */
+  baseUrl: string;
+  /** Authentication applied to every request (injected as a header or query param). */
+  auth?: AuthConfig;
   /** Custom fetch implementation (polyfill, mock, or instrumented). Defaults to `globalThis.fetch`. */
   fetch?: typeof globalThis.fetch;
   /** Extra fetch options merged into every request (e.g. `cache`, `credentials`, `keepalive`). */
@@ -9,27 +13,36 @@ export interface HttpTransportOptions {
 }
 
 /**
- * The default transport: executes requests over HTTP using `fetch`.
+ * The fetch-based HTTP transport. Owns the `baseUrl` and applies `auth` to every
+ * request before dispatching over `fetch`.
  *
  * @example
  * ```ts
- * import { httpTransport } from "@narthia/openapi-sdk-generator/transports/http";
+ * import { http } from "@narthia/openapi-sdk-generator/transports/http";
  *
  * const sdk = createSdk({
- *   baseUrl: "https://api.example.com",
- *   transport: httpTransport({ fetchOptions: { credentials: "include" } }),
+ *   transport: http({
+ *     baseUrl: "https://api.example.com",
+ *     auth: { type: "bearer", token: () => getToken() },
+ *     fetchOptions: { credentials: "include" },
+ *   }),
  * });
  * ```
  */
-export function httpTransport(options: HttpTransportOptions = {}): Transport {
+export function http(options: HttpOptions): Transport {
   const fetchImpl = options.fetch ?? globalThis.fetch;
 
   return {
     async request(req) {
-      const url = buildUrl(req.baseUrl, req.path, req.query);
+      // Clone so auth mutations never leak back into the caller's request object.
+      const headers = { ...req.headers };
+      const query = new URLSearchParams(req.query);
+      await applyAuth(options.auth, headers, query);
+
+      const url = buildUrl(options.baseUrl, req.path, query);
       const res = await fetchImpl(url, {
         method: req.method.toUpperCase(),
-        headers: req.headers,
+        headers,
         body: req.body,
         signal: req.signal,
         ...options.fetchOptions,
@@ -44,6 +57,42 @@ export function httpTransport(options: HttpTransportOptions = {}): Transport {
       };
     },
   };
+}
+
+async function applyAuth(
+  auth: AuthConfig | undefined,
+  headers: Record<string, string>,
+  query: URLSearchParams
+): Promise<void> {
+  if (!auth) return;
+  switch (auth.type) {
+    case "bearer": {
+      headers["authorization"] = `Bearer ${await resolveValue(auth.token)}`;
+      return;
+    }
+    case "apiKey": {
+      const value = await resolveValue(auth.value);
+      if (auth.in === "header") headers[auth.name.toLowerCase()] = value;
+      else query.set(auth.name, value);
+      return;
+    }
+    case "basic": {
+      headers["authorization"] = `Basic ${encodeBase64(`${auth.username}:${auth.password}`)}`;
+      return;
+    }
+  }
+}
+
+function resolveValue(value: ValueOrFactory): string | Promise<string> {
+  return typeof value === "function" ? value() : value;
+}
+
+function encodeBase64(value: string): string {
+  // btoa only handles latin1; go through UTF-8 bytes for correctness.
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 function buildUrl(baseUrl: string, path: string, query: URLSearchParams): string {

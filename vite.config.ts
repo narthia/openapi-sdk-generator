@@ -9,9 +9,9 @@ export default defineConfig({
   pack: {
     entry: ["src/index.ts", "src/*/index.ts", "src/transports/*/index.ts"],
     deps: {
-      neverBundle: ["oxfmt", "oxlint"],
+      neverBundle: ["oxfmt", "oxlint", "@forge/api"],
       dts: {
-        neverBundle: ["oxfmt", "oxlint"],
+        neverBundle: ["oxfmt", "oxlint", "@forge/api"],
       },
     },
     exports: true,
