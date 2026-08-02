@@ -3,9 +3,9 @@ import type { EmitContext } from "./ts-writer.ts";
 import { collectRefs } from "../ir.ts";
 /**
  * Emits the generated `types/` folder:
- * - `types/common.ts` — types referenced by 2+ services (or unreferenced)
- * - `types/<service>.ts` — types used exclusively by one service
- * - `types/index.ts` — barrel re-exporting everything
+ * - `types/common.ts` - types referenced by 2+ services (or unreferenced)
+ * - `types/<service>.ts` - types used exclusively by one service
+ * - `types/index.ts` - barrel re-exporting everything
  */
 import { buildJsDoc } from "../jsdoc.ts";
 import { NameRegistry } from "../names.ts";

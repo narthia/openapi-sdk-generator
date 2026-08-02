@@ -28,7 +28,9 @@ npx openapi-sdk-generator --input ./openapi.json --output ./src/sdk
 | `-c, --config <path>`           | Config file (default: auto-discover `openapi-sdk.config.{ts,mjs,js,json}`, see [Config file](#config-file))                               |
 | `-n, --name <name>`             | Name of the generated factory (default: `createSdk`)                                                                                      |
 | `--runtime-mode <mode>`         | `generate` (inline the runtime into the SDK) or `package` (import it) (default: `generate`, see [Runtime](#runtime-package-vs-generated)) |
-| `--transports <list>`           | Comma-separated transports to generate; first is the default (default: `http`)                                                            |
+| `--transports <list>`           | Comma-separated transports to generate: `http`, `forge` (default: `http`)                                                                 |
+| `--forge-product <product>`     | Atlassian product for the forge transport: `jira`, `confluence`, or `bitbucket` (required with `forge`)                                   |
+| `--forge-as <who>`              | Forge default identity: `app` or `user` (default: `app`)                                                                                  |
 | `--runtime <pkg>`               | Runtime import specifier used in `package` mode (default: `@narthia/openapi-sdk-generator`)                                               |
 | `--import-ext <ext>`            | Relative-import extension in emitted code: `""`, `js`, or `ts` (default: `""`)                                                            |
 | `--collision-case <case>`       | Case for renamed colliding path/query params: `snake_case` or `camelCase` (default: `snake_case`)                                         |
@@ -58,7 +60,7 @@ export default defineConfig({
   input: "https://api.example.com/openapi.json",
   output: "./src/sdk",
   collisionCase: "snake_case",
-  auth: { basic: { usernameField: "email", passwordField: "apiToken" } },
+  transports: { http: { auth: { basic: { usernameField: "email", passwordField: "apiToken" } } } },
 });
 ```
 
@@ -175,7 +177,7 @@ Only a trailing `-SNAPSHOT-<hex>` of at least seven characters (a git short sha)
 
 ### Multiple inputs (one shared runtime)
 
-For several related APIs (e.g. a billing API plus a catalog API), pass an `inputs` map instead of a single `input`. Each key becomes a subfolder with its own SDK, auth, and types, and they **share one emitted runtime** at the output root (no per-input copy):
+For several related APIs (e.g. a billing API plus a catalog API), pass an `inputs` map instead of a single `input`. Each key becomes a subfolder with its own SDK, transports, and types, and they **share one emitted runtime** at the output root (no per-input copy):
 
 ```ts
 await generateSdk({
@@ -184,12 +186,14 @@ await generateSdk({
     billing: {
       input: "./billing.json",
       name: "createBilling",
-      auth: { basic: { usernameField: "email", passwordField: "apiToken" } },
+      transports: {
+        http: { auth: { basic: { usernameField: "email", passwordField: "apiToken" } } },
+      },
     },
     catalog: {
       input: "./catalog.json",
       name: "createCatalog",
-      auth: { bearer: {} },
+      transports: { http: { auth: { bearer: {} } } },
     },
   },
 });
@@ -205,12 +209,63 @@ sdk/
 Then import per input: `import { createBilling } from "./sdk/billing"`, `import { getInvoice } from "./sdk/billing/services/invoices"`.
 
 - `input` and `inputs` are mutually exclusive; a single `input` keeps the flat layout (no subfolder).
-- **Shared** across all inputs: `output`, `clean`, `header`, `normalizeVersion`, `runtime`, `transports`, `importExtension`, `runtimePackage`. **Per input**: `input`, `name`, `auth`, `collisionCase`.
+- **Shared** across all inputs: `output`, `clean`, `header`, `normalizeVersion`, `runtime`, `transports`, `importExtension`, `runtimePackage`. **Per input**: `input`, `name`, `transports`, `collisionCase`. A top-level `transports` is the shared default; a per-input `transports` overrides it key by key (see below).
 - Via the CLI, multiple inputs are configured through a [config file](#config-file)'s `inputs` map (shared flags still override); the per-input flags apply only to a single `--input` run.
+
+### Shared transport across inputs
+
+When several inputs use the **same transport config** (same auth, same Forge product…), hoist it to a top-level `transports`. Every input that doesn't set its own config for that transport shares **one** wrapper emitted at the output root (`transports/http.ts`, `transports/forge.ts`) - you import it once instead of reaching into each subfolder. An input overrides a single transport by setting its own config for that key; other shared transports are still inherited.
+
+```ts
+await generateSdk({
+  output: "./src/sdk",
+  transports: { http: { auth: { basic: { usernameField: "email", passwordField: "apiToken" } } } }, // shared
+  inputs: {
+    billing: { input: "./billing.json", name: "createBilling" }, // inherits shared http
+    catalog: { input: "./catalog.json", name: "createCatalog" }, // inherits shared http
+    reports: {
+      input: "./reports.json",
+      name: "createReports",
+      transports: { http: { auth: { bearer: {} } } }, // overrides http → keeps its own
+    },
+  },
+});
+```
+
+```
+sdk/
+  client/  transports/_http.ts   # shared runtime, emitted once
+  transports/http.ts             # ONE typed transport for the shared group (billing + catalog)
+  billing/  index.ts config.ts services/*.ts types/*.ts   # no transports/ - uses the root one
+  catalog/  index.ts config.ts services/*.ts types/*.ts   # no transports/ - uses the root one
+  reports/  index.ts config.ts transports/http.ts …       # own http → own transport
+```
+
+One import, reused across the grouped SDKs. If they share a base URL, reuse a single instance; if the base URLs differ, call the same `http` once each:
+
+```ts
+import { http } from "./sdk/transports/http";
+import { createBilling } from "./sdk/billing";
+import { createCatalog } from "./sdk/catalog";
+
+const transport = http({ baseUrl, auth: { email, apiToken } }); // same host
+const billing = createBilling({ transport });
+const catalog = createCatalog({ transport });
+
+// or, different hosts sharing credentials:
+const billing2 = createBilling({
+  transport: http({ baseUrl: billingUrl, auth: { email, apiToken } }),
+});
+const catalog2 = createCatalog({
+  transport: http({ baseUrl: catalogUrl, auth: { email, apiToken } }),
+});
+```
+
+> A transport an input inherits is emitted at the root, not in the input's folder - so an input can import one transport from the root and another (that it overrode or added) from its own subfolder. Selecting only `forge` at the top level shares a root `transports/forge.ts` the same way.
 
 ## Use the generated SDK
 
-Two imports: one to initialize the client, one for the transport. Everything backend-specific — `baseUrl`, `auth` — is configured **on the transport**; `createSdk` itself carries only cross-cutting options (`headers`, `onRequest`, `onResponse`).
+Two imports: one to initialize the client, one for the transport. Everything backend-specific - `baseUrl`, `auth` - is configured **on the transport**; `createSdk` itself carries only cross-cutting options (`headers`, `onRequest`, `onResponse`).
 
 ```ts
 import { createSdk } from "./sdk";
@@ -226,7 +281,7 @@ const client = createSdk({
 const pet = await client.pets.getPetById({ petId: 42 });
 ```
 
-The SDK's own `http` (from `./sdk/transports/http`) carries **typed auth** named for your spec's security schemes (see [Auth](#auth)). Other backends are configured the same way — e.g. `transport: forgeJira({ as: "app" })` for an Atlassian Forge app (see [Forge](#atlassian-forge)).
+The SDK's own `http` (from `./sdk/transports/http`) carries **typed auth** named for your spec's security schemes (see [Auth](#auth)). Other backends are configured the same way - e.g. `transport: forgeJira({ as: "app" })` for an Atlassian Forge app (see [Forge](#atlassian-forge)).
 
 Each method takes **two arguments**: the **data** first (path params, query params, and the request body's own properties, all merged into one flat object), and an optional **`options`** second (per-request `headers`, `signal`, `extensions`):
 
@@ -346,7 +401,7 @@ await generateSdk({ input, output }); // self-contained (default)
 await generateSdk({ input, output, runtime: "package" }); // import from the package
 ```
 
-`transports` selects which transports to inline in `"generate"` mode (default `["http"]`); the first entry is the default transport. In `"package"` mode transports are imported from the package instead.
+`transports` is a map that selects which transports the SDK emits and holds each one's generate-time config: `{ http: { auth }, forge: { product, as } }`. Presence of a key enables it; omit `transports` and you get `{ http: {} }`. In `"generate"` mode the generic `http` is inlined (`transports/_http.ts`, with `transports/http.ts` resolving to it); in `"package"` mode it's imported from the package. **Forge is always imported from the package** (it needs the `@forge/api` peer dependency) and is never inlined. See [Atlassian Forge](#atlassian-forge).
 
 ## Tree-shaking
 
@@ -371,13 +426,13 @@ Import `createClient` from **`./sdk/config`** (not `./sdk/client`): it's a servi
 
 Auth is a property of the **HTTP transport**, not the client. The SDK's own `http` (from `./sdk/transports/http`) is **typed to your spec's schemes**: the config fields are named for your API and only the schemes you support are allowed. A generated client uses **one** auth scheme (see [Multiple schemes](#multiple-schemes) for how the caller picks).
 
-Configure the scheme names with the `auth` option (`generateSdk`) or the `--auth-*` flags. `auth` is a map keyed by scheme; each entry's field names are yours to choose - for example, rename basic auth's `username`/`password` to `email`/`apitoken`:
+Configure the scheme names under `transports.http.auth` (`generateSdk`) or with the `--auth-*` flags. `auth` is a map keyed by scheme; each entry's field names are yours to choose - for example, rename basic auth's `username`/`password` to `email`/`apitoken`:
 
 ```ts
 await generateSdk({
   input: "./openapi.json",
   output: "./src/sdk",
-  auth: { basic: { usernameField: "email", passwordField: "apitoken" } },
+  transports: { http: { auth: { basic: { usernameField: "email", passwordField: "apitoken" } } } },
 });
 ```
 
@@ -397,16 +452,20 @@ const client = createSdk({
 
 Default field names per type: bearer -> `token`, apiKey -> `value`, basic -> `username` / `password`. Rename any of them with `field` (bearer/apiKey), `usernameField` / `passwordField` (basic), or the matching CLI flags. `apiKey` also needs `in` (`header` or `query`) and the wire `name`.
 
-When the spec has **no** security schemes (and no `auth` option), `./sdk/transports/http` simply re-exports the package's generic `http`, whose `auth` accepts the runtime shape `{ type: "bearer" | "apiKey" | "basic", ... }`.
+When the spec has **no** security schemes (and no `transports.http.auth`), `./sdk/transports/http` simply re-exports the package's generic `http`, whose `auth` accepts the runtime shape `{ type: "bearer" | "apiKey" | "basic", ... }`.
 
 ### Multiple schemes
 
 List more than one entry in the map when an API supports several auth methods. The transport's `auth` becomes a **discriminated union** - the caller picks exactly one, and only it is applied:
 
 ```ts
-auth: {
-  basic: {},
-  bearer: { field: "accessToken" },
+transports: {
+  http: {
+    auth: {
+      basic: {},
+      bearer: { field: "accessToken" },
+    },
+  },
 };
 // -> http({ baseUrl, auth: { type: "bearer", accessToken: "..." } })
 //    or http({ baseUrl, auth: { type: "basic", username: "...", password: "..." } })
@@ -418,11 +477,28 @@ Each scheme is keyed by its `type` (`basic`, `bearer`, `apiKey`), so the map hol
 
 ### Derived from the spec
 
-When you pass no `auth` option, schemes are derived automatically from the spec's `components.securitySchemes` (`http`/`bearer`, `http`/`basic`, and `apiKey`; `oauth2` / `openIdConnect` are treated as a bearer token), with default field names. Passing an explicit `auth` option overrides this entirely. If neither is present, `./sdk/transports/http` re-exports the generic `http` with the runtime's generic `auth` shape.
+When you pass no `transports.http.auth`, schemes are derived automatically from the spec's `components.securitySchemes` (`http`/`bearer`, `http`/`basic`, and `apiKey`; `oauth2` / `openIdConnect` are treated as a bearer token), with default field names. Passing an explicit `auth` overrides this entirely. If neither is present, `./sdk/transports/http` re-exports the generic `http` with the runtime's generic `auth` shape.
 
 ## Atlassian Forge
 
-To run a generated SDK **inside an Atlassian Forge app**, use a Forge transport instead of `http` — it routes each request through `@forge/api` (`forgeJira` / `forgeConfluence` / `forgeBitbucket`, with per-call `asApp()`/`asUser()` selection), so there's no `baseUrl` or `auth` to set.
+To run a generated SDK **inside an Atlassian Forge app**, use a Forge transport instead of `http` - it routes each request through `@forge/api` (`forgeJira` / `forgeConfluence` / `forgeBitbucket`, with per-call `asApp()`/`asUser()` selection), so there's no `baseUrl` or `auth` to set.
+
+Select it at generate time so the SDK ships a product-bound `transports/forge.ts` (a single `forge()` factory, plus a re-exported `forgeAs`):
+
+```ts
+await generateSdk({
+  input: "./jira.json",
+  output: "./src/sdk",
+  transports: { forge: { product: "jira", as: "app" } }, // `product` is required
+});
+```
+
+```ts
+import { forge, forgeAs } from "./sdk/transports/forge";
+const sdk = createSdk({ transport: forge({ as: "app" }) });
+```
+
+Because Forge needs the `@forge/api` peer dependency, its wrapper always imports from the package (`@narthia/openapi-sdk-generator/transports/forge`) and is never inlined, even in `runtime: "generate"` mode. You can still use the package factories directly instead of generating a wrapper:
 
 ```ts
 import { forgeJira, forgeAs } from "@narthia/openapi-sdk-generator/transports/forge";

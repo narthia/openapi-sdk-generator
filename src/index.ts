@@ -1,5 +1,5 @@
 /**
- * `@narthia/openapi-sdk-generator` — generate fully typed, JSDoc-documented
+ * `@narthia/openapi-sdk-generator` - generate fully typed, JSDoc-documented
  * TypeScript SDKs from OpenAPI 3.0/3.1 documents.
  *
  * - This root export is the generator (programmatic API).
@@ -10,11 +10,14 @@
 export { generateSdk } from "./generator/generate.ts";
 export type {
   AuthOption,
+  ForgeTransportOption,
   GeneratedFile,
   GenerateOptions,
   GenerateResult,
+  HttpTransportOption,
   SharedOptions,
   TargetOptions,
+  TransportsOption,
 } from "./generator/generate.ts";
 export { defineConfig } from "./config.ts";
 export type { Config } from "./config.ts";

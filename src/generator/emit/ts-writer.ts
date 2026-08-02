@@ -9,7 +9,20 @@ const INDENT = "  ";
 export type CollisionCase = "snake_case" | "camelCase";
 
 /** A transport the generator can emit or import. */
-export type TransportName = "http";
+export type TransportName = "http" | "forge";
+
+/** Atlassian product a Forge transport targets. */
+export type ForgeProduct = "jira" | "confluence" | "bitbucket";
+
+/** Which Atlassian identity a Forge request runs as by default. */
+export type ForgeIdentity = "app" | "user";
+
+/** Fully resolved Forge transport config (defaults applied). */
+export interface ResolvedForge {
+  product: ForgeProduct;
+  /** Default identity baked into the emitted wrapper (caller can override per instance). */
+  as: ForgeIdentity;
+}
 
 /**
  * Where the runtime (client core + transports) comes from in generated code:
@@ -42,11 +55,17 @@ export interface EmitContext {
   sdkName: string;
   /** Case used to render a collided path/query param name (`snake_case` → `status_query`, `camelCase` → `statusQuery`). */
   collisionCase: CollisionCase;
-  /** Resolved auth model, or `undefined` to emit the generic runtime `ClientConfig`. */
+  /**
+   * Resolved auth model for the http transport wrapper being emitted, or
+   * `undefined` to fall back to the generic runtime `ClientConfig` auth. Only
+   * read when emitting `transports/http.ts`.
+   */
   auth?: ResolvedAuth;
+  /** Resolved Forge config for the forge wrapper being emitted. Only read when emitting `transports/forge.ts`. */
+  forge?: ResolvedForge;
   /** Whether the runtime is emitted into the SDK (`"generate"`) or imported from the package (`"package"`). */
   runtime: RuntimeMode;
-  /** Transports emitted into the SDK in `"generate"` mode; the first is the default. */
+  /** Inlinable transports copied into the runtime in `"generate"` mode (read by `emitRuntime`). */
   transports: TransportName[];
   /** How many folder levels this SDK sits below the output root (0 = flat, 1 = under `<subdir>/` for multi-input). */
   subdirDepth: number;
@@ -74,11 +93,6 @@ export function clientBase(depth: number): string {
 export function runtimeClientImport(ctx: EmitContext, relBase: string): string {
   if (ctx.runtime === "generate") return relativeImport(ctx, relBase, true);
   return `${ctx.runtimePackage}/client`;
-}
-
-/** The default transport in `"generate"` mode (first entry). */
-export function defaultTransport(ctx: EmitContext): TransportName {
-  return ctx.transports[0] ?? "http";
 }
 
 /**

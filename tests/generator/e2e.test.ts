@@ -116,7 +116,7 @@ describe("end-to-end: generate, import, and call", () => {
 
   it("generate mode: a standalone op drives a request through the inlined runtime", async () => {
     const genDir = fileURLToPath(new URL("./__e2e_gen__/sdk", import.meta.url));
-    // Default runtime: "generate" — self-contained; import the inlined runtime + a single op.
+    // Default runtime: "generate" - self-contained; import the inlined runtime + a single op.
     await generateSdk({ input: fixture, output: genDir, importExtension: "ts" });
 
     const { createClient } = (await import(`${genDir}/config.ts`)) as {

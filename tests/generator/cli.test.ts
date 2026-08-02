@@ -75,7 +75,27 @@ describe("runCli", () => {
     const { io, err } = captureIo();
     const out = await makeOut();
     expect(await runCli(["-i", fixture, "-o", out, "--transports", "grpc"], io)).toBe(1);
-    expect(err.join("\n")).toContain('Unknown transport "grpc"');
+    expect(err.join("\n")).toContain('--transports values must be "http" or "forge"');
+  });
+
+  it("generates a forge transport via flags", async () => {
+    const { io } = captureIo();
+    const out = await makeOut();
+    expect(
+      await runCli(
+        ["-i", fixture, "-o", out, "--transports", "forge", "--forge-product", "jira"],
+        io
+      )
+    ).toBe(0);
+    const forgeMod = await readFile(join(out, "transports/forge.ts"), "utf8");
+    expect(forgeMod).toContain("forgeJira");
+  });
+
+  it("requires --forge-product when generating forge", async () => {
+    const { io, err } = captureIo();
+    const out = await makeOut();
+    expect(await runCli(["-i", fixture, "-o", out, "--transports", "forge"], io)).toBe(1);
+    expect(err.join("\n")).toContain("--forge-product is required");
   });
 
   it("--runtime-mode package imports from the package", async () => {

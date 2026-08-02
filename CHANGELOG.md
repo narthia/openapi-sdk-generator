@@ -4,7 +4,7 @@
 
 ### Major Changes
 
-- aa2ac5e: Transport-owned configuration (breaking). Backend-specific settings — `baseUrl`, `auth` — now live **on the transport** instead of the shared client config, and `transport` is required. This removes the awkward mix of cross-cutting and backend-specific fields on one config object and makes invalid combinations unrepresentable (a Forge SDK has no `baseUrl` field to set at all) rather than something the runtime has to reject.
+- aa2ac5e: Transport-owned configuration (breaking). Backend-specific settings - `baseUrl`, `auth` - now live **on the transport** instead of the shared client config, and `transport` is required. This removes the awkward mix of cross-cutting and backend-specific fields on one config object and makes invalid combinations unrepresentable (a Forge SDK has no `baseUrl` field to set at all) rather than something the runtime has to reject.
 
   New Atlassian Forge transports are included: `forgeJira` / `forgeConfluence` / `forgeBitbucket` (+ `forgeAs`) from `@narthia/openapi-sdk-generator/transports/forge`, backed by the optional `@forge/api` peer dependency.
 

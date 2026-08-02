@@ -4,7 +4,7 @@ export type SpecInput = string | URL | Record<string, unknown>;
 
 /**
  * Load an OpenAPI document from a file path, an http(s) URL, or an in-memory object.
- * JSON only — YAML input produces a clear error.
+ * JSON only - YAML input produces a clear error.
  */
 export async function loadSpec(input: SpecInput): Promise<Record<string, unknown>> {
   if (typeof input === "object" && !(input instanceof URL)) {
@@ -47,7 +47,7 @@ function parseJsonSpec(text: string, source: string): Record<string, unknown> {
   const trimmed = text.trimStart();
   if (!trimmed.startsWith("{")) {
     throw new Error(
-      `OpenAPI spec at ${source} is not a JSON object. YAML specs are not yet supported — convert to JSON.`
+      `OpenAPI spec at ${source} is not a JSON object. YAML specs are not yet supported - convert to JSON.`
     );
   }
   try {

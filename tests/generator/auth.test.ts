@@ -32,7 +32,7 @@ async function generateFiles(
   auth: AuthOption | undefined,
   input = spec()
 ): Promise<(path: string) => string> {
-  const { files } = await generateSdk({ input, auth });
+  const { files } = await generateSdk({ input, transports: { http: { auth } } });
   return (path: string) => files.find((f) => f.path === path)!.contents;
 }
 
@@ -161,16 +161,22 @@ describe("generated auth SDKs", () => {
       input: spec(),
       output: join(dir, "single"),
       runtimePackage: "@narthia/openapi-sdk-generator",
-      auth: { basic: { usernameField: "email", passwordField: "apitoken" } },
+      transports: {
+        http: { auth: { basic: { usernameField: "email", passwordField: "apitoken" } } },
+      },
     });
     await generateSdk({
       input: spec(),
       output: join(dir, "multi"),
       runtimePackage: "@narthia/openapi-sdk-generator",
-      auth: {
-        basic: {},
-        bearer: { field: "accessToken" },
-        apiKey: { in: "header", name: "X-API-Key", field: "apiKey" },
+      transports: {
+        http: {
+          auth: {
+            basic: {},
+            bearer: { field: "accessToken" },
+            apiKey: { in: "header", name: "X-API-Key", field: "apiKey" },
+          },
+        },
       },
     });
 
@@ -212,7 +218,9 @@ describe("generated auth SDKs", () => {
       runtime: "package",
       runtimePackage: `${repoRoot.replace(/\/$/, "")}/src`,
       importExtension: "ts",
-      auth: { basic: { usernameField: "email", passwordField: "apitoken" } },
+      transports: {
+        http: { auth: { basic: { usernameField: "email", passwordField: "apitoken" } } },
+      },
     });
 
     // Capture the outgoing fetch so we can assert the adapted Authorization header.

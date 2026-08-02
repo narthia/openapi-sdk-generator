@@ -25,9 +25,15 @@ const twoInputs = {
   catalog: {
     input: fixture31,
     name: "createCatalog",
-    auth: { basic: { usernameField: "email", passwordField: "apiToken" } },
+    transports: {
+      http: { auth: { basic: { usernameField: "email", passwordField: "apiToken" } } },
+    },
   },
-  billing: { input: fixture30, name: "createBilling", auth: { bearer: {} } },
+  billing: {
+    input: fixture30,
+    name: "createBilling",
+    transports: { http: { auth: { bearer: {} } } },
+  },
 } as const;
 
 describe("normalizeTargets", () => {
@@ -93,6 +99,89 @@ describe("multi-input generate mode", () => {
     expect(get("catalog/services/pets.ts")!).toContain('from "../../client"');
     // Within-subdir imports are unchanged.
     expect(get("catalog/index.ts")!).toContain('from "./config"');
+  });
+});
+
+describe("multi-input shared transport", () => {
+  const sharedHttp = {
+    transports: {
+      http: { auth: { basic: { usernameField: "email", passwordField: "apiToken" } } },
+    },
+    inputs: {
+      catalog: { input: fixture31, name: "createCatalog" },
+      billing: { input: fixture30, name: "createBilling" },
+    },
+  } as const;
+
+  it("emits one root transport and no per-input transports for the shared group", async () => {
+    const { paths, get } = await generate(sharedHttp);
+    expect(paths).toContain("transports/http.ts");
+    expect(paths).not.toContain("catalog/transports/http.ts");
+    expect(paths).not.toContain("billing/transports/http.ts");
+
+    const root = get("transports/http.ts")!;
+    expect(root).toContain("email: string;");
+    expect(root).toContain("apiToken: string;");
+    // Root transport reaches the generic runtime as a sibling, and the client one level up.
+    expect(root).toContain('from "./_http"');
+    expect(root).toContain('from "../client"');
+  });
+
+  it("lets an input override a transport (keeps its own) while others inherit", async () => {
+    const { paths, get } = await generate({
+      transports: {
+        http: { auth: { basic: { usernameField: "email", passwordField: "apiToken" } } },
+      },
+      inputs: {
+        catalog: { input: fixture31, name: "createCatalog" },
+        billing: {
+          input: fixture30,
+          name: "createBilling",
+          transports: { http: { auth: { bearer: {} } } },
+        },
+      },
+    });
+    // Shared group (catalog) uses the root transport; billing keeps its own.
+    expect(paths).toContain("transports/http.ts");
+    expect(paths).not.toContain("catalog/transports/http.ts");
+    expect(paths).toContain("billing/transports/http.ts");
+    expect(get("billing/transports/http.ts")!).toContain("token: ValueOrFactory;");
+  });
+
+  it("does not emit a shared transport when no shared transports are given", async () => {
+    const { paths } = await generate({ inputs: twoInputs });
+    expect(paths).not.toContain("transports/http.ts");
+    expect(paths).toContain("catalog/transports/http.ts");
+    expect(paths).toContain("billing/transports/http.ts");
+  });
+
+  it("emits the shared transport in package mode too", async () => {
+    const { paths, get } = await generate({ ...sharedHttp, runtime: "package" });
+    expect(paths).toContain("transports/http.ts");
+    expect(paths).not.toContain("catalog/transports/http.ts");
+    expect(get("transports/http.ts")!).toContain(
+      'from "@narthia/openapi-sdk-generator/transports/http"'
+    );
+  });
+
+  it("shares a forge transport at the root and re-exports forgeAs", async () => {
+    const { paths, get } = await generate({
+      transports: { forge: { product: "jira", as: "user" } },
+      inputs: {
+        issues: { input: fixture31, name: "createIssues" },
+        boards: { input: fixture30, name: "createBoards" },
+      },
+    });
+    expect(paths).toContain("transports/forge.ts");
+    expect(paths).not.toContain("issues/transports/forge.ts");
+    // Forge is never inlined; there is no generic http used here either.
+    expect(paths).not.toContain("transports/_forge.ts");
+    const forge = get("transports/forge.ts")!;
+    expect(forge).toContain(
+      'import { forgeJira } from "@narthia/openapi-sdk-generator/transports/forge"'
+    );
+    expect(forge).toContain('return forgeJira({ as: options.as ?? "user" });');
+    expect(forge).toContain("export { forgeAs }");
   });
 });
 

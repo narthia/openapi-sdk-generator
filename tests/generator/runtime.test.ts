@@ -1,6 +1,11 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { generateSdk, resolveTransports } from "../../src/generator/generate.ts";
+import {
+  generateSdk,
+  planTargetTransports,
+  resolveForge,
+  validateTransports,
+} from "../../src/generator/generate.ts";
 
 const fixture = fileURLToPath(new URL("../fixtures/petstore-3.1.json", import.meta.url));
 
@@ -10,17 +15,59 @@ async function generate(options: Parameters<typeof generateSdk>[0]) {
   return { paths: files.map((f) => f.path), get };
 }
 
-describe("resolveTransports", () => {
-  it("defaults to http", () => {
-    expect(resolveTransports(undefined)).toEqual(["http"]);
-  });
-
-  it("throws on an empty list", () => {
-    expect(() => resolveTransports([])).toThrow(/at least one transport/);
+describe("validateTransports", () => {
+  it("accepts undefined and known transports", () => {
+    expect(() => validateTransports(undefined, "transports")).not.toThrow();
+    expect(() => validateTransports({ http: {} }, "transports")).not.toThrow();
+    expect(() => validateTransports({ forge: { product: "jira" } }, "transports")).not.toThrow();
   });
 
   it("throws on an unknown transport", () => {
-    expect(() => resolveTransports(["grpc" as "http"])).toThrow(/Unknown transport "grpc"/);
+    expect(() => validateTransports({ grpc: {} } as never, "transports")).toThrow(
+      /Unknown transport "grpc"/
+    );
+  });
+
+  it("throws on an invalid forge product or identity", () => {
+    expect(() =>
+      validateTransports({ forge: { product: "slack" as never } }, "transports")
+    ).toThrow(/forge\.product/);
+    expect(() =>
+      validateTransports({ forge: { product: "jira", as: "root" as never } }, "transports")
+    ).toThrow(/forge\.as/);
+  });
+});
+
+describe("planTargetTransports", () => {
+  it("defaults to http when nothing is configured", () => {
+    expect(planTargetTransports(undefined, undefined)).toEqual({ ownHttp: { auth: undefined } });
+  });
+
+  it("inherits a shared transport the target does not override", () => {
+    const shared = { http: { auth: { bearer: {} } } };
+    expect(planTargetTransports(undefined, shared)).toEqual({ inheritHttp: true });
+  });
+
+  it("lets a per-target transport override the shared one", () => {
+    const shared = { http: { auth: { bearer: {} } } };
+    const own = { http: { auth: { basic: {} } } };
+    expect(planTargetTransports(own, shared)).toEqual({ ownHttp: { auth: { basic: {} } } });
+  });
+
+  it("mixes an inherited transport with an added one", () => {
+    const shared = { http: { auth: { bearer: {} } } };
+    const own = { forge: { product: "jira" as const } };
+    expect(planTargetTransports(own, shared)).toEqual({
+      inheritHttp: true,
+      ownForge: { product: "jira" },
+    });
+  });
+});
+
+describe("resolveForge", () => {
+  it("defaults the identity to app", () => {
+    expect(resolveForge({ product: "confluence" })).toEqual({ product: "confluence", as: "app" });
+    expect(resolveForge({ product: "jira", as: "user" })).toEqual({ product: "jira", as: "user" });
   });
 });
 
@@ -62,7 +109,9 @@ describe("runtime: generate (default)", () => {
   it("emits the typed http transport (with auth) into transports/http.ts", async () => {
     const { get } = await generate({
       input: fixture,
-      auth: { basic: { usernameField: "email", passwordField: "apiToken" } },
+      transports: {
+        http: { auth: { basic: { usernameField: "email", passwordField: "apiToken" } } },
+      },
     });
     const httpMod = get("transports/http.ts")!;
     expect(httpMod).toContain("email: string;");

@@ -39,7 +39,7 @@ const PRODUCT_METHOD = {
  *
  * Forge owns URL resolution and auth (via `asApp()`/`asUser()`), so there is no
  * `baseUrl` or `auth` to configure. The path + query prepared by the client core is
- * already fully encoded, so it is passed to `assumeTrustedRoute` verbatim — never
+ * already fully encoded, so it is passed to `assumeTrustedRoute` verbatim - never
  * re-encoded by Forge's `route` template.
  */
 function createForgeTransport(
@@ -117,7 +117,7 @@ export interface ForgeCallOptions {
   /**
    * Atlassian account id to impersonate via Forge offline user impersonation
    * (`asUser(accountId)`). Only meaningful when `as: "user"`. Requires the app
-   * manifest to declare `allowImpersonation: true` for the scopes in use — see
+   * manifest to declare `allowImpersonation: true` for the scopes in use - see
    * https://developer.atlassian.com/platform/forge/apis-reference/fetch-api-product.requestjira/
    */
   accountId?: string;

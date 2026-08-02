@@ -134,7 +134,9 @@ describe("runCli with a config file", () => {
       JSON.stringify({
         input: fixture,
         output: outDir,
-        auth: { basic: { usernameField: "email", passwordField: "apiToken" } },
+        transports: {
+          http: { auth: { basic: { usernameField: "email", passwordField: "apiToken" } } },
+        },
       })
     );
 
@@ -145,17 +147,41 @@ describe("runCli with a config file", () => {
     expect(httpMod).toContain("apiToken: string;");
   });
 
-  it("lets CLI auth flags override config auth", async () => {
+  it("lets CLI auth flags override config transports", async () => {
     const dir = await makeDir();
     const outDir = join(dir, "sdk");
     const cfg = join(dir, "sdk.config.json");
-    await writeFile(cfg, JSON.stringify({ input: fixture, output: outDir, auth: { basic: {} } }));
+    await writeFile(
+      cfg,
+      JSON.stringify({
+        input: fixture,
+        output: outDir,
+        transports: { http: { auth: { basic: {} } } },
+      })
+    );
 
     const { io } = captureIo();
     expect(await runCli(["-c", cfg, "--auth-type", "bearer"], io)).toBe(0);
     const httpMod = await readFile(join(outDir, "transports/http.ts"), "utf8");
     expect(httpMod).toContain("token: ValueOrFactory;");
     expect(httpMod).not.toContain("username: string;");
+  });
+
+  it("generates a forge transport from the config file", async () => {
+    const dir = await makeDir();
+    const outDir = join(dir, "sdk");
+    const cfg = join(dir, "sdk.config.json");
+    await writeFile(
+      cfg,
+      JSON.stringify({ input: fixture, output: outDir, transports: { forge: { product: "jira" } } })
+    );
+
+    const { io } = captureIo();
+    expect(await runCli(["-c", cfg], io)).toBe(0);
+    const forgeMod = await readFile(join(outDir, "transports/forge.ts"), "utf8");
+    expect(forgeMod).toContain("forgeJira");
+    // Forge-only SDK: no http wrapper and no inlined generic http.
+    await expect(stat(join(outDir, "transports/http.ts"))).rejects.toThrow(/ENOENT/);
   });
 
   it("errors when input/output are absent from both flags and config", async () => {

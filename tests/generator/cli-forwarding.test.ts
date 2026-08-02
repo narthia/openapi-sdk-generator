@@ -51,9 +51,9 @@ const sharedCases = (outDir: string): Record<keyof SharedOptions, unknown> => ({
   runtimePackage: "my-runtime",
   importExtension: "js",
   runtime: "package",
-  // Only one transport exists, so this cannot differ from the default; a dropped
-  // key still fails the assertion below (`undefined` vs `["http"]`).
-  transports: ["http"],
+  // A non-default transports map (forge is never the default) so a dropped key
+  // fails the assertion below (`undefined` vs the object).
+  transports: { forge: { product: "jira" } },
 });
 
 describe("CLI option forwarding", () => {
@@ -113,7 +113,7 @@ describe("CLI option forwarding", () => {
       input: fixture,
       name: "createFromConfig",
       collisionCase: "camelCase",
-      auth: { bearer: { field: "apiToken" } },
+      transports: { http: { auth: { bearer: { field: "apiToken" } } } },
     };
     await writeFile(cfg, JSON.stringify({ output: join(dir, "sdk"), ...expected }));
 

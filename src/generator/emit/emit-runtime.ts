@@ -20,6 +20,13 @@ import { headerLines } from "./emit-types.ts";
 /** Client-core files copied verbatim (with import rewrites) into `sdk/client/`. */
 const CLIENT_FILES = ["index.ts", "client.ts", "errors.ts", "serialize.ts", "types.ts"];
 
+/**
+ * Transports whose generic source can be inlined into the SDK in `"generate"`
+ * mode. Forge is excluded: it depends on the `@forge/api` peer dependency and is
+ * always imported from the package instead of copied in.
+ */
+const INLINABLE_TRANSPORTS: readonly string[] = ["http"];
+
 const RUNTIME_ROOT = findRuntimeRoot();
 
 /**
@@ -35,6 +42,7 @@ export function emitRuntime(ctx: EmitContext): Map<string, string> {
   }
 
   for (const transport of ctx.transports) {
+    if (!INLINABLE_TRANSPORTS.includes(transport)) continue;
     const src = readFileSync(join(RUNTIME_ROOT, "transports", transport, "index.ts"), "utf8");
     files.set(`transports/_${transport}.ts`, withHeader(rewriteImports(src, ctx), ctx));
   }

@@ -6,6 +6,7 @@ import type {
   EmitContext,
   ResolvedAuth,
   ResolvedAuthScheme,
+  ResolvedForge,
   RuntimeMode,
   TransportName,
 } from "./emit/ts-writer.ts";
@@ -17,6 +18,7 @@ import { emitConfig } from "./emit/emit-config.ts";
 import { emitIndex } from "./emit/emit-index.ts";
 import { emitRuntime } from "./emit/emit-runtime.ts";
 import { emitService } from "./emit/emit-service.ts";
+import { emitTransportForge } from "./emit/emit-transport-forge.ts";
 import { emitTransportHttp } from "./emit/emit-transport-http.ts";
 import { emitTypesFolder, partitionSchemas } from "./emit/emit-types.ts";
 import { buildIr } from "./ir.ts";
@@ -24,7 +26,9 @@ import { loadSpec } from "./load.ts";
 import { kebabCase } from "./names.ts";
 
 /** Transports the generator knows how to emit or import. */
-const KNOWN_TRANSPORTS: readonly TransportName[] = ["http"];
+const KNOWN_TRANSPORTS: readonly TransportName[] = ["http", "forge"];
+const FORGE_PRODUCTS: readonly string[] = ["jira", "confluence", "bitbucket"];
+const FORGE_IDENTITIES: readonly string[] = ["app", "user"];
 
 /**
  * Generate-time auth configuration for the emitted SDK. Each present key enables
@@ -54,6 +58,49 @@ export interface AuthOption {
     /** Config field holding the key value. @default "value" */
     field?: string;
   };
+}
+
+/** Generate-time config for the http transport. */
+export interface HttpTransportOption {
+  /**
+   * Auth the generated http transport exposes and applies. When omitted, auth
+   * schemes are derived from the spec's `components.securitySchemes` (if any).
+   */
+  auth?: AuthOption;
+}
+
+/**
+ * Generate-time config for the Atlassian Forge transport. The product can't be
+ * inferred from an arbitrary OpenAPI spec, so it is required. Forge is always
+ * imported from the package (it needs the `@forge/api` peer dependency) and is
+ * never inlined, regardless of {@link SharedOptions.runtime}.
+ */
+export interface ForgeTransportOption {
+  /** Atlassian product this SDK targets. */
+  product: "jira" | "confluence" | "bitbucket";
+  /**
+   * Default identity for requests that don't select one per call. Baked into the
+   * emitted wrapper; still overridable at construction and per call.
+   * @default "app"
+   */
+  as?: "app" | "user";
+}
+
+/**
+ * Which transports the generator emits, keyed by transport name. Presence of a
+ * key enables that transport; its value is that transport's generate-time config
+ * (`{}` = enabled with defaults). Omitting `transports` entirely enables `http`
+ * with spec-derived auth.
+ *
+ * For multiple inputs, a top-level `transports` is the **shared** config: every
+ * input that doesn't set its own `transports[<name>]` inherits it and joins a
+ * group that shares one transport emitted at the output root (see
+ * {@link generateSdk}). An input overrides a single transport by setting its own
+ * config for that key; other shared transports are still inherited.
+ */
+export interface TransportsOption {
+  http?: HttpTransportOption;
+  forge?: ForgeTransportOption;
 }
 
 /** Options that apply to the whole generation run (shared across all inputs). */
@@ -120,12 +167,11 @@ export interface SharedOptions {
    */
   runtime?: RuntimeMode;
   /**
-   * Transports emitted into the SDK in `"generate"` mode; the first entry is the
-   * default transport. Ignored in `"package"` mode (transports are imported from
-   * the package there).
-   * @default ["http"]
+   * Which transports the SDK emits, and their generate-time config. For multiple
+   * inputs this is the **shared** config inherited by every input that doesn't
+   * set its own (see {@link generateSdk}). Defaults to `{ http: {} }`.
    */
-  transports?: TransportName[];
+  transports?: TransportsOption;
 }
 
 /** Options for a single generated SDK (one OpenAPI spec). */
@@ -138,11 +184,13 @@ export interface TargetOptions {
    */
   name?: string;
   /**
-   * Auth the generated SDK exposes and applies. When omitted, auth schemes are
-   * derived from the spec's `components.securitySchemes` (if any); when neither
-   * is present, the SDK config uses the generic runtime `ClientConfig` auth.
+   * Transports this input emits, and their generate-time config. For multiple
+   * inputs, any transport set here overrides the shared top-level `transports`
+   * for that key (the input keeps its own wrapper instead of the shared one);
+   * transports not set here are still inherited from the shared config. Auth
+   * lives under `transports.http.auth`.
    */
-  auth?: AuthOption;
+  transports?: TransportsOption;
   /**
    * Case used to render a path/query param name that collides with another
    * param or a request-body property: `"snake_case"` → `status_query`,
@@ -164,7 +212,6 @@ export type GenerateOptions =
       inputs: Record<string, TargetOptions>;
       input?: never;
       name?: never;
-      auth?: never;
       collisionCase?: never;
     });
 
@@ -202,33 +249,79 @@ export async function generateSdk(options: GenerateOptions): Promise<GenerateRes
     );
   }
 
-  const shared = {
+  const shared: SharedResolved = {
     runtimePackage: options.runtimePackage ?? "@narthia/openapi-sdk-generator",
     importExtension: options.importExtension ?? "",
     runtime: options.runtime ?? "generate",
-    transports: resolveTransports(options.transports),
     header: options.header ?? true,
     normalizeVersion: options.normalizeVersion ?? false,
-  } as const;
+  };
   const targets = normalizeTargets(options);
+
+  // Shared transports (multi-input only): the top-level `transports` every input
+  // inherits unless it sets its own for that key. Inherited transports are emitted
+  // ONCE at the output root (`transports/<name>.ts`) instead of per input.
+  const sharedTransports = "inputs" in options ? options.transports : undefined;
+  validateTransports(sharedTransports, "transports");
+  for (const target of targets) {
+    validateTransports(
+      target.transports,
+      target.subdir === "" ? "transports" : `inputs.${target.subdir}.transports`
+    );
+  }
+
+  // Decide, per target, which transports it emits itself vs inherits from the
+  // shared root, and which transports are used anywhere (drives runtime inlining
+  // and the root wrappers).
+  const used = { http: false, forge: false };
+  const root = { http: false, forge: false };
+  const plans = targets.map((target) => {
+    const plan = planTargetTransports(target.transports, sharedTransports);
+    if (plan.ownHttp || plan.inheritHttp) used.http = true;
+    if (plan.ownForge || plan.inheritForge) used.forge = true;
+    if (plan.inheritHttp) root.http = true;
+    if (plan.inheritForge) root.forge = true;
+    return plan;
+  });
 
   const files: GeneratedFile[] = [];
   const warnings: string[] = [];
-  for (const target of targets) {
-    const { files: targetFiles, warnings: targetWarnings } = await generateTarget(target, shared);
+  for (let i = 0; i < targets.length; i++) {
+    const { files: targetFiles, warnings: targetWarnings } = await generateTarget(
+      targets[i]!,
+      shared,
+      plans[i]!
+    );
     files.push(...targetFiles);
     warnings.push(...targetWarnings);
   }
 
-  // Self-contained mode: emit the shared client core + transports once at the root.
+  // Root wrappers shared by every input that inherited them. Resolved against no
+  // spec schemes: shared config is explicit and spans multiple specs.
+  const rootCtx = (extra: Partial<EmitContext>): EmitContext => ({
+    ...shared,
+    transports: [],
+    sdkName: "createSdk",
+    collisionCase: "snake_case",
+    subdirDepth: 0,
+    ...extra,
+  });
+  if (root.http && sharedTransports?.http) {
+    const auth = resolveAuthModel(sharedTransports.http.auth, []);
+    files.push({ path: "transports/http.ts", contents: emitTransportHttp(rootCtx({ auth })) });
+  }
+  if (root.forge && sharedTransports?.forge) {
+    const forge = resolveForge(sharedTransports.forge);
+    files.push({ path: "transports/forge.ts", contents: emitTransportForge(rootCtx({ forge })) });
+  }
+
+  // Self-contained mode: emit the shared client core + inlinable transports once
+  // at the root. Forge is never inlined (it needs the `@forge/api` peer dep).
   if (shared.runtime === "generate") {
-    const runtimeCtx: EmitContext = {
-      ...shared,
-      sdkName: "createSdk",
-      collisionCase: "snake_case",
-      subdirDepth: 0,
-    };
-    for (const [path, contents] of emitRuntime(runtimeCtx)) files.push({ path, contents });
+    const inline: TransportName[] = used.http ? ["http"] : [];
+    for (const [path, contents] of emitRuntime(rootCtx({ transports: inline }))) {
+      files.push({ path, contents });
+    }
   }
 
   if (options.output !== undefined) {
@@ -261,24 +354,65 @@ type SharedResolved = {
   runtimePackage: string;
   importExtension: "" | "js" | "ts";
   runtime: RuntimeMode;
-  transports: TransportName[];
   header: boolean;
   normalizeVersion: boolean;
 };
 
+/**
+ * Per-target transport plan: which transport wrappers a target emits itself
+ * (`own*`) and which it inherits from the shared root and therefore skips
+ * (`inherit*`). At most one of the two flags is set per transport.
+ */
+interface TargetTransportPlan {
+  /** Emit an own `transports/http.ts` here, with this auth option (`undefined` → spec-derived). */
+  ownHttp?: { auth: AuthOption | undefined };
+  /** Emit an own `transports/forge.ts` here with this config. */
+  ownForge?: ForgeTransportOption;
+  /** Inherit the root `transports/http.ts` (emit nothing here). */
+  inheritHttp?: boolean;
+  /** Inherit the root `transports/forge.ts` (emit nothing here). */
+  inheritForge?: boolean;
+}
+
+/**
+ * Resolve a target's transport plan: for each transport, its own config wins;
+ * otherwise it inherits the shared config for that key. When neither the target
+ * nor the shared config names any transport, http is enabled by default (with
+ * spec-derived auth).
+ */
+export function planTargetTransports(
+  own: TransportsOption | undefined,
+  shared: TransportsOption | undefined
+): TargetTransportPlan {
+  const keys = new Set([...Object.keys(own ?? {}), ...Object.keys(shared ?? {})]);
+  if (keys.size === 0) return { ownHttp: { auth: undefined } };
+
+  const plan: TargetTransportPlan = {};
+  if (own?.http) plan.ownHttp = { auth: own.http.auth };
+  else if (shared?.http) plan.inheritHttp = true;
+
+  if (own?.forge) plan.ownForge = own.forge;
+  else if (shared?.forge) plan.inheritForge = true;
+
+  return plan;
+}
+
 /** Emit all files for one target, prefixing paths with its subfolder. */
 async function generateTarget(
   target: Target,
-  shared: SharedResolved
+  shared: SharedResolved,
+  plan: TargetTransportPlan
 ): Promise<{ files: GeneratedFile[]; warnings: string[] }> {
   const spec = await loadSpec(target.input);
   const ir = buildIr(spec, detectVersion(spec));
 
   const ctx: EmitContext = {
     ...shared,
+    transports: [],
     sdkName: target.name ?? "createSdk",
     collisionCase: target.collisionCase ?? "snake_case",
-    auth: resolveAuthModel(target.auth, ir.authSchemes),
+    auth: plan.ownHttp ? resolveAuthModel(plan.ownHttp.auth, ir.authSchemes) : undefined,
+    forge: plan.ownForge ? resolveForge(plan.ownForge) : undefined,
     subdirDepth: target.subdir === "" ? 0 : 1,
   };
 
@@ -296,7 +430,13 @@ async function generateTarget(
     });
   }
   files.push({ path: `${prefix}config.ts`, contents: emitConfig(ctx) });
-  files.push({ path: `${prefix}transports/http.ts`, contents: emitTransportHttp(ctx) });
+  // A transport this target inherits from the shared root is emitted there, not here.
+  if (plan.ownHttp) {
+    files.push({ path: `${prefix}transports/http.ts`, contents: emitTransportHttp(ctx) });
+  }
+  if (plan.ownForge) {
+    files.push({ path: `${prefix}transports/forge.ts`, contents: emitTransportForge(ctx) });
+  }
   files.push({ path: `${prefix}index.ts`, contents: emitIndex(ir, ctx, typeFiles.size > 0) });
 
   return { files, warnings: ir.warnings };
@@ -331,27 +471,41 @@ export function normalizeTargets(options: GenerateOptions): Target[] {
     {
       input: options.input,
       name: options.name,
-      auth: options.auth,
+      transports: options.transports,
       collisionCase: options.collisionCase,
       subdir: "",
     },
   ];
 }
 
-/** Validate and default the `transports` option against the known set. */
-export function resolveTransports(transports: TransportName[] | undefined): TransportName[] {
-  if (transports === undefined) return ["http"];
-  if (transports.length === 0) {
-    throw new Error("`transports` must list at least one transport.");
-  }
-  for (const name of transports) {
-    if (!KNOWN_TRANSPORTS.includes(name)) {
+/** Validate a `transports` option: known keys only, and a well-formed forge config. */
+export function validateTransports(option: TransportsOption | undefined, label: string): void {
+  if (option === undefined) return;
+  for (const key of Object.keys(option)) {
+    if (!KNOWN_TRANSPORTS.includes(key as TransportName)) {
       throw new Error(
-        `Unknown transport "${name}"; supported transports: ${KNOWN_TRANSPORTS.join(", ")}.`
+        `Unknown transport "${key}" in \`${label}\`; supported transports: ${KNOWN_TRANSPORTS.join(", ")}.`
       );
     }
   }
-  return transports;
+  if (option.forge) {
+    const { product, as } = option.forge;
+    if (!FORGE_PRODUCTS.includes(product)) {
+      throw new Error(
+        `\`${label}.forge.product\` must be one of ${FORGE_PRODUCTS.join(", ")} (got "${String(product)}").`
+      );
+    }
+    if (as !== undefined && !FORGE_IDENTITIES.includes(as)) {
+      throw new Error(
+        `\`${label}.forge.as\` must be one of ${FORGE_IDENTITIES.join(", ")} (got "${String(as)}").`
+      );
+    }
+  }
+}
+
+/** Resolve a {@link ForgeTransportOption} to its emitted form, applying the `as` default. */
+export function resolveForge(option: ForgeTransportOption): ResolvedForge {
+  return { product: option.product, as: option.as ?? "app" };
 }
 
 /**

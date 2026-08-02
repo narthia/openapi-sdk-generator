@@ -454,7 +454,7 @@ describe("generated code validity", () => {
   it("generate mode: self-contained output compiles with NO package mapping", async () => {
     const dir = await mkdtemp(join(tmpdir(), "narthia-sdk-gen-"));
     dirs.push(dir);
-    // Default runtime: "generate" — the runtime is inlined, so tsc needs no paths.
+    // Default runtime: "generate" - the runtime is inlined, so tsc needs no paths.
     await generateSdk({ input: fixture("petstore-3.0.json"), output: join(dir, "sdk") });
     await writeTsconfig(dir);
     await expect(execFileAsync(tsc, ["-p", dir], { cwd: dir })).resolves.toBeDefined();
