@@ -540,10 +540,7 @@ class IrBuilder {
     // Combinators first: allOf → intersection, oneOf/anyOf → union.
     if (schema.allOf) {
       const members = schema.allOf.map((m) => this.toType(m));
-      return withNull(
-        schema,
-        members.length === 1 ? members[0]! : { kind: "intersection", members }
-      );
+      return withNull(schema, dedupeIntersection(members));
     }
     if (schema.oneOf || schema.anyOf) {
       const variants = (schema.oneOf ?? schema.anyOf)!.map((m) => this.toType(m));
@@ -719,6 +716,25 @@ function dedupeUnion(variants: IrType[]): IrType {
   const concrete = unique.filter((v) => v.kind !== "unknown");
   const result = concrete.length > 0 ? concrete : unique;
   return result.length === 1 ? result[0]! : { kind: "union", variants: result };
+}
+
+/**
+ * Collapse the members of an `allOf` intersection. `T & unknown` is just `T` in
+ * TypeScript (and lints as redundant), so drop `unknown` members whenever a
+ * concrete one survives; all-unknown intersections stay `unknown`.
+ */
+function dedupeIntersection(members: IrType[]): IrType {
+  const seen = new Set<string>();
+  const unique = members.filter((m) => {
+    const key = JSON.stringify(m);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const concrete = unique.filter((m) => m.kind !== "unknown");
+  const result = concrete.length > 0 ? concrete : unique;
+  if (result.length === 0) return { kind: "unknown" };
+  return result.length === 1 ? result[0]! : { kind: "intersection", members: result };
 }
 
 function withNull(schema: NormalizedSchema, type: IrType): IrType {

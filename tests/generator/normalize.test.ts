@@ -56,6 +56,50 @@ describe("normalizeSchema", () => {
     expect(normalizeSchema(undefined, "3.1")).toEqual({});
   });
 
+  it("folds annotation-only allOf members into the parent", () => {
+    const schema = normalizeSchema(
+      {
+        allOf: [
+          { $ref: "#/components/schemas/AccessLevel" },
+          { description: "The access level of the user.", readOnly: true },
+        ],
+      },
+      "3.1"
+    );
+    expect(schema).toEqual({
+      allOf: [{ $ref: "#/components/schemas/AccessLevel" }],
+      description: "The access level of the user.",
+    });
+  });
+
+  it("keeps the parent's own annotations when folding allOf members", () => {
+    const schema = normalizeSchema(
+      {
+        description: "Parent wins",
+        allOf: [{ description: "Member loses", example: "e" }, { type: "string" }],
+      },
+      "3.1"
+    );
+    expect(schema).toEqual({
+      allOf: [{ types: ["string"] }],
+      description: "Parent wins",
+      example: "e",
+    });
+  });
+
+  it("drops allOf entirely when every member is annotation-only", () => {
+    const schema = normalizeSchema({ allOf: [{ readOnly: true }, { description: "d" }] }, "3.1");
+    expect(schema).toEqual({ description: "d" });
+  });
+
+  it("leaves allOf untouched when all members carry type information", () => {
+    const schema = normalizeSchema(
+      { allOf: [{ $ref: "#/components/schemas/A" }, { type: "object" }] },
+      "3.1"
+    );
+    expect(schema.allOf).toEqual([{ $ref: "#/components/schemas/A" }, { types: ["object"] }]);
+  });
+
   it("dedupes type arrays and preserves format/annotations", () => {
     const schema = normalizeSchema(
       {

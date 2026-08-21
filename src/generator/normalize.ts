@@ -105,7 +105,63 @@ export function normalizeSchema(raw: unknown, mode: OpenApiMode): NormalizedSche
   }
 
   copyAnnotations(schema, out);
+  if (out.allOf) hoistAnnotationOnlyMembers(out);
   return out;
+}
+
+/**
+ * A member that carries no type information: it cannot contribute anything to
+ * the generated type, only annotations. Specs commonly use such members to
+ * attach a description (or `readOnly`, which normalization already drops) to a
+ * sibling `$ref`.
+ */
+function isAnnotationOnly(schema: NormalizedSchema): boolean {
+  return (
+    schema.$ref === undefined &&
+    schema.types === undefined &&
+    schema.enum === undefined &&
+    schema.properties === undefined &&
+    schema.items === undefined &&
+    schema.additionalProperties === undefined &&
+    schema.allOf === undefined &&
+    schema.oneOf === undefined &&
+    schema.anyOf === undefined
+  );
+}
+
+/**
+ * Fold annotation-only `allOf` members into their parent: the annotations they
+ * carry are lifted (without overriding the parent's own) and the members are
+ * dropped, so `allOf: [$ref, { description }]` becomes a plain `$ref` carrying
+ * that description instead of an `X & unknown` intersection with no docs.
+ */
+function hoistAnnotationOnlyMembers(out: NormalizedSchema): void {
+  const members = out.allOf!;
+  const kept = members.filter((m) => !isAnnotationOnly(m));
+  if (kept.length === members.length) return;
+
+  for (const member of members) {
+    if (!isAnnotationOnly(member)) continue;
+    if (out.title === undefined && member.title !== undefined) out.title = member.title;
+    if (out.description === undefined && member.description !== undefined) {
+      out.description = member.description;
+    }
+    if (out.deprecated === undefined && member.deprecated !== undefined) {
+      out.deprecated = member.deprecated;
+    }
+    if (out.example === undefined && member.example !== undefined) out.example = member.example;
+    if (out.default === undefined && member.default !== undefined) out.default = member.default;
+    if (out.format === undefined && member.format !== undefined) out.format = member.format;
+    if (out.externalDocs === undefined && member.externalDocs !== undefined) {
+      out.externalDocs = member.externalDocs;
+    }
+    if (out.contentMediaType === undefined && member.contentMediaType !== undefined) {
+      out.contentMediaType = member.contentMediaType;
+    }
+  }
+
+  if (kept.length === 0) delete out.allOf;
+  else out.allOf = kept;
 }
 
 function copyAnnotations(schema: RawSchema, out: NormalizedSchema): void {

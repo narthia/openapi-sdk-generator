@@ -154,6 +154,71 @@ describe("buildIr edge cases", () => {
     expect(ir.warnings.some((w) => w.includes('unsupported style "deepObject"'))).toBe(true);
   });
 
+  it("folds a description-only allOf member into the referenced type", () => {
+    const ir = minimal(
+      {},
+      {
+        components: {
+          schemas: {
+            AccessLevel: { type: "string", enum: ["VIEWER", "OWNER"] },
+            Workspace: {
+              type: "object",
+              required: ["accessLevel"],
+              properties: {
+                accessLevel: {
+                  allOf: [
+                    { $ref: "#/components/schemas/AccessLevel" },
+                    { description: "The access level of the user.", readOnly: true },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      }
+    );
+    const workspace = ir.schemas.find((s) => s.name === "Workspace")!;
+    const accessLevel = (workspace.type as Extract<IrType, { kind: "object" }>).properties[0]!;
+    expect(accessLevel.type).toEqual({ kind: "ref", name: "AccessLevel" });
+    expect(accessLevel.docs.description).toBe("The access level of the user.");
+  });
+
+  it("collapses duplicate and unknown allOf members instead of intersecting them", () => {
+    const ir = minimal(
+      {},
+      {
+        components: {
+          examples: { blank: {} },
+          schemas: {
+            Named: { type: "object", properties: { id: { type: "string" } } },
+            Duplicated: {
+              allOf: [
+                { $ref: "#/components/schemas/Named" },
+                { $ref: "#/components/schemas/Named" },
+              ],
+            },
+            WithBlank: {
+              allOf: [
+                { $ref: "#/components/schemas/Named" },
+                { $ref: "#/components/examples/blank" },
+              ],
+            },
+            AllBlank: {
+              allOf: [
+                { $ref: "#/components/examples/blank" },
+                { $ref: "#/components/examples/blank" },
+              ],
+            },
+          },
+        },
+      }
+    );
+    const byName = Object.fromEntries(ir.schemas.map((s) => [s.name, s]));
+    expect(byName["Duplicated"]!.type).toEqual({ kind: "ref", name: "Named" });
+    expect(byName["WithBlank"]!.type).toEqual({ kind: "ref", name: "Named" });
+    expect(byName["AllBlank"]!.type).toEqual({ kind: "unknown" });
+  });
+
   it("hoists structurally identical anonymous schemas into one named type", () => {
     const shape = {
       type: "object",
